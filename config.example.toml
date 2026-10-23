@@ -1,0 +1,24 @@
+# Copy this file to ~/.config/cli-agent/config.toml, or pass it with --config.
+
+default_provider = "deepseek"
+default_model = "deepseek-flash[1M]"
+permission_mode = "accept-edits"
+
+[providers.deepseek]
+kind = "anthropic_compat"
+base_url = "https://api.deepseek.com/anthropic"
+api_key_env = ["DEEPSEEK_API_KEY"]
+default_model = "deepseek-flash[1M]"
+context_window = 1000000
+max_output_tokens = 8192
+supports_thinking = true
+thinking_by_default = true
+
+[thinking]
+# enabled = true
+budget_tokens = 4096
+
+[memory]
+enabled = true
+extraction_min_new_messages = 8
+extraction_cooldown_seconds = 60
