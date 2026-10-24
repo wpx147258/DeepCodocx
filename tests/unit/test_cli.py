@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from cli_agent.entry import main
@@ -330,3 +331,59 @@ def test_global_options_apply_to_run(tmp_path: Path, monkeypatch) -> None:
     )
     assert result.exit_code == 0
     assert captured["options"].provider == "deepseek"
+
+
+def _bundle() -> SimpleNamespace:
+    class FakeRuntime:
+        async def run_turn(self, text: str):
+            yield AgentTextDelta("ok")
+            yield AgentTurnFinished("end_turn", Usage())
+
+        async def close(self) -> None:
+            return None
+
+    return SimpleNamespace(
+        runtime=FakeRuntime(),
+        profile=SimpleNamespace(model="m", provider_name="p"),
+        session_id="s",
+        resumed=False,
+        degraded=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--max-turns", "0", "run", "hi"],
+        ["run", "--max-turns", "0", "hi"],
+        ["--max-turns", "-1", "run", "hi"],
+        ["run", "--max-turns", "-3", "hi"],
+    ],
+)
+def test_max_turns_rejects_non_positive(tmp_path: Path, args: list[str]) -> None:
+    result = CliRunner().invoke(main, args, env=_env(tmp_path))
+    assert result.exit_code == 2
+    assert "not in the range" in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--max-turns", "1", "run", "hi"], 1),
+        (["run", "--max-turns", "2", "hi"], 2),
+        (["--max-turns", "5", "run", "--max-turns", "7", "hi"], 7),
+    ],
+)
+def test_max_turns_normal_values_pass(
+    tmp_path: Path, monkeypatch, args: list[str], expected: int
+) -> None:
+    captured = {}
+
+    def fake_build(options):
+        captured["options"] = options
+        return _bundle()
+
+    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    result = CliRunner().invoke(main, args, env=_env(tmp_path))
+    assert result.exit_code == 0
+    assert captured["options"].max_turns == expected

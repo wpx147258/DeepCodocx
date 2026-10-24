@@ -35,7 +35,10 @@ def _common_options(f: Any) -> Any:
         help="Explicit TOML config path.",
     )(f)
     f = click.option(
-        "--max-turns", type=int, default=None, help="Maximum model calls per turn."
+        "--max-turns",
+        type=click.IntRange(min=1),
+        default=None,
+        help="Maximum model calls per turn (minimum 1).",
     )(f)
     f = click.option(
         "--thinking/--no-thinking",

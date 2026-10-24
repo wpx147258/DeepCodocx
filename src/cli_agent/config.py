@@ -274,7 +274,9 @@ def load_config(
             f"choose one of {', '.join(PERMISSION_MODES)}"
         )
 
-    max_turns = _optional_int(data, "max_turns") or 50
+    max_turns = _optional_int(data, "max_turns")
+    if max_turns is None:
+        max_turns = 50
     if max_turns < 1:
         raise ConfigError("max_turns must be at least 1")
     (

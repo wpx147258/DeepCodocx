@@ -227,3 +227,11 @@ def test_memory_extraction_validation(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="at least 1"):
         load_config(cwd=tmp_path, env=_env(tmp_path))
+
+
+def test_max_turns_zero_is_rejected(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text("max_turns = 0", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_turns"):
+        load_config(cwd=tmp_path, env=_env(tmp_path))
