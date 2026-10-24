@@ -326,3 +326,63 @@ def test_store_close_is_idempotent(tmp_path: Path) -> None:
         assert loaded.messages == ()
     finally:
         resumed.close()
+
+
+def test_clear_resets_messages_usage_and_checkpoint(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("before clear"))
+    store.append_usage(Usage(1, 2), "mock-1")
+    store.save_context({"summary": "old compaction"})
+    store.append_clear()
+    store.save_context(None)
+    store.append_usage(Usage(3, 4), "mock-1")
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.usage == Usage(3, 4)
+        assert loaded.messages == ()
+        assert loaded.checkpoint is None
+    finally:
+        resumed.close()
+
+
+def test_clear_as_last_record_resets_usage(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("before clear"))
+    store.append_usage(Usage(9, 9), "mock-1")
+    store.append_clear()
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.usage == Usage()
+        assert loaded.messages == ()
+    finally:
+        resumed.close()
+
+
+def test_legacy_clear_without_usage_reset_field_resets_usage(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_usage(Usage(5, 6), "mock-1")
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"v":1,"type":"clear","at":"2026-01-01T00:00:00+00:00"}\n')
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.usage == Usage()
+    finally:
+        resumed.close()

@@ -11,6 +11,7 @@ from cli_agent.events import (
     AgentToolStarted,
     AgentTurnFinished,
 )
+from cli_agent.messages import Usage
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from cli_agent.providers.base import ProviderError, ReasoningDelta, TextDelta, ToolCall
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
@@ -166,13 +167,15 @@ async def test_fatal_error_is_reported(tmp_path: Path) -> None:
     await runtime.close()
 
 
-async def test_clear_resets_transcript(tmp_path: Path) -> None:
+async def test_clear_resets_transcript_and_usage(tmp_path: Path) -> None:
     provider = FakeProvider([[text_response("hello")]])
     runtime, _ = make_runtime(provider, tmp_path=tmp_path)
     await _consume(runtime, "hi")
     assert runtime.messages
+    assert runtime.usage != Usage()
     await runtime.clear()
     assert runtime.messages == ()
+    assert runtime.usage == Usage()
     await runtime.close()
 
 

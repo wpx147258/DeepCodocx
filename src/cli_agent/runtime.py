@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
 from .context.pipeline import ContextPipeline
@@ -361,10 +361,12 @@ class AgentRuntime:
             yield AgentNotice("Nothing to compact.")
 
     async def clear(self) -> None:
-        self._deps.transcript.clear()
-        self._deps.context.set_checkpoint(None)
+        # Persist first: a failed write must not leave memory ahead of disk.
         self._deps.session.append_clear()
         self._deps.session.save_context(None)
+        self._deps.transcript.clear()
+        self._deps.context.set_checkpoint(None)
+        self._usage = Usage()
         self._active_request = ""
 
     async def switch_model(self, provider_name: str, model: str) -> None:

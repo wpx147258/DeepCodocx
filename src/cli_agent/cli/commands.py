@@ -17,10 +17,10 @@ class CommandResult:
 
 _HELP = """Commands:
   /help              show this help
-  /clear             clear the conversation
+  /clear             clear the conversation and reset usage
   /compact           compact the context now
   /model [NAME]      show or switch model; use provider:model to switch provider
-  /cost              show cumulative token usage
+  /cost              show token usage since the last /clear
   /exit              leave the REPL
 
 Key flags: -p/--print, -c/--resume, --provider, --model, --permission-mode."""
@@ -46,7 +46,7 @@ class CommandDispatcher:
             return CommandResult(True)
         if name == "clear":
             await runtime.clear()
-            renderer.notice("Conversation cleared.")
+            renderer.notice("Conversation cleared; usage reset.")
             return CommandResult(True)
         if name == "compact":
             async for event in runtime.compact():

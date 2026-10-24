@@ -190,9 +190,17 @@ class SessionStore:
         )
 
     def append_clear(self) -> None:
+        """Start a new conversation: messages and usage reset from this point."""
         if not self.persist:
             return
-        self._append({"v": SCHEMA_VERSION, "type": "clear", "at": now_iso()})
+        self._append(
+            {
+                "v": SCHEMA_VERSION,
+                "type": "clear",
+                "usage_reset": True,
+                "at": now_iso(),
+            }
+        )
 
     def save_context(self, checkpoint: dict[str, Any] | None) -> None:
         if not self.persist:
@@ -224,7 +232,10 @@ class SessionStore:
         return checkpoint if isinstance(checkpoint, dict) else None
 
     def _append(self, record: dict[str, Any]) -> None:
-        append_line(self.paths.jsonl, json.dumps(record, ensure_ascii=False))
+        try:
+            append_line(self.paths.jsonl, json.dumps(record, ensure_ascii=False))
+        except OSError as exc:
+            raise SessionError(f"could not append session record: {exc}") from exc
 
     def _load(self) -> LoadedSession:
         messages: list[Message] = []
@@ -311,6 +322,9 @@ class SessionStore:
                     degraded = True
             elif record_type == "clear":
                 messages.clear()
+                # Older clear records lack the field; they reset usage too.
+                if record.get("usage_reset", True) is not False:
+                    usage = Usage()
             else:
                 logger.debug("ignoring unknown session record type: %r", record_type)
 

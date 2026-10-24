@@ -195,6 +195,7 @@ Implemented today:
 - streaming reasoning display: on by default in the REPL, off in one-shot mode;
   `--thinking/--no-thinking` overrides it (one-shot mode writes reasoning to stderr);
 - REPL (`cli-agent`), one-shot (`cli-agent run`), and `/help /clear /compact /model /cost /exit`;
+  `/clear` starts a new conversation and resets usage, so `/cost` counts from that point;
 - headless `--output-format text|json|jsonl` with a stable result schema, clean
   stdout, stderr diagnostics, and non-zero exit on incomplete turns.
 
