@@ -28,6 +28,7 @@ def load_project_instructions(cwd: Path, global_agents_md: Path | None = None) -
     if local.is_file():
         files.append(local)
 
+    global_resolved = global_agents_md.resolve() if global_agents_md else None
     seen_paths: set[Path] = set()
     chunks: list[str] = []
     for path in files:
@@ -35,13 +36,18 @@ def load_project_instructions(cwd: Path, global_agents_md: Path | None = None) -
         if resolved in seen_paths:
             continue
         seen_paths.add(resolved)
-        text = _expand_file(resolved, seen_paths, depth=0)
+        root = (
+            global_resolved.parent
+            if global_resolved is not None and resolved == global_resolved
+            else cwd
+        )
+        text = _expand_file(resolved, seen_paths, depth=0, root=root)
         if text.strip():
             chunks.append(f"# From {path}\n\n{text.strip()}")
     return "\n\n".join(chunks)
 
 
-def _expand_file(path: Path, seen: set[Path], depth: int) -> str:
+def _expand_file(path: Path, seen: set[Path], depth: int, root: Path) -> str:
     if depth > 10:
         return "[include depth limit reached]"
     try:
@@ -63,6 +69,9 @@ def _expand_file(path: Path, seen: set[Path], depth: int) -> str:
         if not candidate.is_absolute():
             candidate = path.parent / candidate
         candidate = candidate.resolve()
+        if not candidate.is_relative_to(root):
+            output.append(f"[include denied: outside {root}: {raw}]")
+            continue
         if candidate in seen:
             output.append(f"[include cycle: {raw}]")
             continue
@@ -70,5 +79,5 @@ def _expand_file(path: Path, seen: set[Path], depth: int) -> str:
             output.append(f"[missing include: {raw}]")
             continue
         seen.add(candidate)
-        output.append(_expand_file(candidate, seen, depth + 1))
+        output.append(_expand_file(candidate, seen, depth + 1, root))
     return "\n".join(output)

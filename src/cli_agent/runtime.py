@@ -67,6 +67,25 @@ ProviderBuild = tuple[Provider, ModelProfile, ThinkingConfig | None]
 
 
 @dataclass
+class ProviderSlot:
+    """Mutable current-provider holder shared with background helpers."""
+
+    provider: Provider
+    profile: ModelProfile
+    thinking: ThinkingConfig | None = None
+
+    def replace(
+        self,
+        provider: Provider,
+        profile: ModelProfile,
+        thinking: ThinkingConfig | None,
+    ) -> None:
+        self.provider = provider
+        self.profile = profile
+        self.thinking = thinking
+
+
+@dataclass
 class RuntimeDeps:
     provider: Provider
     profile: ModelProfile
@@ -90,6 +109,7 @@ class RuntimeDeps:
     extractor: MemoryExtractor | None = None
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
+    provider_slot: ProviderSlot | None = None
 
 
 @dataclass
@@ -103,6 +123,10 @@ class _Recovery:
 class AgentRuntime:
     def __init__(self, deps: RuntimeDeps) -> None:
         self._deps = deps
+        if deps.provider_slot is None:
+            deps.provider_slot = ProviderSlot(
+                deps.provider, deps.profile, deps.thinking
+            )
         self._usage = deps.initial_usage
         self._active_request = ""
         self._extraction_task: asyncio.Task[None] | None = None
@@ -250,8 +274,19 @@ class AgentRuntime:
                     self._append(user_message(CONTINUE_PROMPT))
                     yield AgentContextEvent("continue", "max output tokens; asking for continuation")
                     continue
-                await self._after_turn("end_turn")
-                yield AgentTurnFinished("end_turn", self._usage)
+
+                if stop_reason in ("refusal", "error"):
+                    yield AgentError(
+                        f"provider stopped with {stop_reason}", stop_reason
+                    )
+                elif stop_reason == "max_tokens":
+                    yield AgentNotice(
+                        "Output limit reached; the response may be incomplete."
+                    )
+
+                # Only a genuine end_turn may trigger memory extraction.
+                await self._after_turn(stop_reason)
+                yield AgentTurnFinished(stop_reason, self._usage)
                 return
 
             results: list[ToolResultBlock] = []
@@ -321,6 +356,8 @@ class AgentRuntime:
         self._deps.provider = provider
         self._deps.profile = profile
         self._deps.thinking = thinking
+        if self._deps.provider_slot is not None:
+            self._deps.provider_slot.replace(provider, profile, thinking)
         try:
             await old.aclose()
         except Exception:  # noqa: BLE001

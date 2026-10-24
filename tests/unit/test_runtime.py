@@ -3,7 +3,13 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from cli_agent.events import AgentError, AgentTextDelta, AgentToolFinished, AgentTurnFinished
+from cli_agent.events import (
+    AgentError,
+    AgentNotice,
+    AgentTextDelta,
+    AgentToolFinished,
+    AgentTurnFinished,
+)
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
@@ -182,4 +188,41 @@ async def test_request_carries_thinking_config(tmp_path: Path) -> None:
     await _consume(runtime, "go")
     assert provider.requests[0].thinking == ThinkingConfig(2_048)
     assert runtime.thinking == ThinkingConfig(2_048)
+    await runtime.close()
+
+
+async def test_refusal_stop_reason_is_preserved(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("no", stop_reason="refusal")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentError) and event.kind == "refusal" for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "refusal"
+    await runtime.close()
+
+
+async def test_error_stop_reason_is_preserved(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("bad", stop_reason="error")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentError) and event.kind == "error" for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "error"
+    await runtime.close()
+
+
+async def test_max_tokens_exhaustion_is_reported(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            [text_response("a", stop_reason="max_tokens")],
+            [text_response("b", stop_reason="max_tokens")],
+            [text_response("c", stop_reason="max_tokens")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentNotice) and "Output limit" in event.text for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "max_tokens"
+    assert len(provider.requests) == 3
     await runtime.close()

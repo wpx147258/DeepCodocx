@@ -81,6 +81,9 @@ cli-agent --no-thinking                 # hide model reasoning in the REPL
 cli-agent --thinking -p "..."           # show reasoning on stderr in print mode
 ```
 
+On resume, explicit `--provider`/`--model` override the saved session. If you
+change the provider without a model, the new provider's default model is used.
+
 `--extended-thinking` is a request capability: it sends the provider's `thinking`
 parameter and requires the selected provider/model to declare `supports_thinking`.
 Providers may also default it on (`thinking_by_default`); the DeepSeek preset does,
@@ -94,6 +97,8 @@ Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from
 `AGENTS.md` and `.agents/`; `cli-agent` does not reuse `.claude/` or `CLAUDE.md`.
+`@include` paths in project instructions are restricted to the workspace; includes in
+the global config `AGENTS.md` are restricted to the config directory.
 
 ## Learn
 
