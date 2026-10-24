@@ -28,5 +28,8 @@
 - Background helpers (summarization, memory extraction) are best-effort: retry
   `retryable` provider errors, cap total time, and log a single warning rather than a
   traceback. Do not let a background failure surface as an agent turn error.
+- Headless JSON output is a public surface: stdout carries data only, diagnostics
+  go to stderr, and every completed turn ends with a `result` object. Keep event
+  and field names stable; use `stop_reason`/`is_complete` for completion.
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

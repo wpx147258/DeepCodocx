@@ -1,4 +1,4 @@
-"""REPL and print-mode hosts. They own input and rendering, never runtime state."""
+"""REPL and one-shot hosts. They own input and rendering, never runtime state."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from ..permissions.policy import Answer, PermissionRequest
 from ..runtime import AgentRuntime
 from .commands import CommandDispatcher
 from .input import read_user_input
-from .render import PrintRenderer, Renderer
+from .render import JsonRenderer, PrintRenderer, Renderer
 
 
 class RichAsker:
@@ -103,17 +103,39 @@ async def _consume_turn(
 
 
 async def run_print(
-    bundle: RuntimeBundle, prompt: str, *, show_reasoning: bool = False
+    bundle: RuntimeBundle,
+    prompt: str,
+    *,
+    show_reasoning: bool = False,
+    output_format: str = "text",
 ) -> int:
-    renderer = PrintRenderer(show_reasoning=show_reasoning)
+    if output_format == "text":
+        renderer: PrintRenderer | JsonRenderer = PrintRenderer(
+            show_reasoning=show_reasoning
+        )
+    else:
+        renderer = JsonRenderer(
+            session_id=bundle.session_id,
+            provider=bundle.profile.provider_name,
+            model=bundle.profile.model,
+            stream=output_format == "jsonl",
+            show_reasoning=show_reasoning,
+            resumed=bundle.resumed,
+        )
+
+    renderer.start()
     try:
         async for event in bundle.runtime.run_turn(prompt):
             renderer.render(event)
     except KeyboardInterrupt:
+        renderer.interrupt()
         return 130
-    except Exception as exc:  # noqa: BLE001 - print mode reports and exits
-        print(f"error: {type(exc).__name__}: {exc}")
+    except Exception as exc:  # noqa: BLE001 - one-shot mode reports and exits
+        renderer.fatal(exc)
         return 2
+    else:
+        renderer.finish()
+        complete = renderer.stop_reason == "end_turn" and not renderer.failed
+        return 0 if complete else 2
     finally:
         await bundle.runtime.close()
-    return 2 if renderer.failed else 0
