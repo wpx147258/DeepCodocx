@@ -211,14 +211,20 @@ class AgentRuntime:
             stop_reason: StopReason = "end_turn"
             parse_errors: dict[str, str] = {}
             emitted_text = False
+            emitted_partial = False
             try:
                 async for provider_event in self._deps.provider.stream(request):
                     if isinstance(provider_event, TextDelta):
-                        emitted_text = True
-                        yield AgentTextDelta(provider_event.text)
+                        if provider_event.text:
+                            emitted_text = True
+                            emitted_partial = True
+                            yield AgentTextDelta(provider_event.text)
                     elif isinstance(provider_event, ReasoningDelta):
-                        yield AgentTextDelta(provider_event.text, reasoning=True)
+                        if provider_event.text:
+                            emitted_partial = True
+                            yield AgentTextDelta(provider_event.text, reasoning=True)
                     elif isinstance(provider_event, ToolCall):
+                        emitted_partial = True
                         if provider_event.parse_error:
                             parse_errors[provider_event.tool_use_id] = provider_event.parse_error
                         yield AgentToolStarted(
@@ -235,6 +241,7 @@ class AgentRuntime:
                     elif isinstance(provider_event, ResponseCompleted):
                         assistant = provider_event.message
                         if not emitted_text and assistant.text():
+                            emitted_partial = True
                             yield AgentTextDelta(assistant.text())
                         self._append(assistant)
                         stop_reason = provider_event.stop_reason
@@ -246,7 +253,18 @@ class AgentRuntime:
                             estimated, provider_event.usage.input_tokens
                         )
                         yield AgentUsage(provider_event.usage, self._usage)
+                        break
             except ProviderFailure as failure:
+                if emitted_partial and failure.kind in ("retryable", "context_length"):
+                    # Retrying would stream the same opening again. Stop and
+                    # let the user decide whether to resend.
+                    yield AgentError(
+                        f"{failure.message} (after partial output; not retrying)",
+                        failure.kind,
+                        failure.status_code,
+                    )
+                    yield AgentTurnFinished("error", self._usage)
+                    return
                 action = await self._recover(failure, recovery)
                 if action == "retry":
                     turns -= 1
@@ -255,7 +273,7 @@ class AgentRuntime:
                     turns -= 1
                     continue
                 yield AgentError(failure.message, failure.kind, failure.status_code)
-                await self._after_turn("error")
+                yield AgentTurnFinished("error", self._usage)
                 return
             except asyncio.CancelledError:
                 await self._after_turn("cancelled")
@@ -263,7 +281,7 @@ class AgentRuntime:
 
             if assistant is None:
                 yield AgentError("provider stream ended without a final message", "fatal")
-                await self._after_turn("error")
+                yield AgentTurnFinished("error", self._usage)
                 return
 
             recovery.retries = 0

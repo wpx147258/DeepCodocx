@@ -8,9 +8,11 @@ from cli_agent.events import (
     AgentNotice,
     AgentTextDelta,
     AgentToolFinished,
+    AgentToolStarted,
     AgentTurnFinished,
 )
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
+from cli_agent.providers.base import ProviderError, ReasoningDelta, TextDelta, ToolCall
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
 
@@ -140,6 +142,7 @@ async def test_retryable_error_is_retried(tmp_path: Path, monkeypatch) -> None:
     assert len(provider.requests) == 2
     assert any(isinstance(event, AgentTextDelta) and event.text == "ok" for event in events)
     assert not any(isinstance(event, AgentError) for event in events)
+    assert [message.role for message in runtime.messages] == ["user", "assistant"]
     await runtime.close()
 
 
@@ -225,4 +228,89 @@ async def test_max_tokens_exhaustion_is_reported(tmp_path: Path) -> None:
     assert isinstance(events[-1], AgentTurnFinished)
     assert events[-1].stop_reason == "max_tokens"
     assert len(provider.requests) == 3
+    await runtime.close()
+
+
+async def test_no_retry_after_partial_text(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [[TextDelta("partial"), ProviderError("rate limited", "retryable", 429)]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 1
+    assert any(
+        isinstance(event, AgentTextDelta) and event.text == "partial"
+        for event in events
+    )
+    error = next(event for event in events if isinstance(event, AgentError))
+    assert error.kind == "retryable"
+    assert error.status_code == 429
+    assert "not retrying" in error.message
+    finishes = [event for event in events if isinstance(event, AgentTurnFinished)]
+    assert len(finishes) == 1 and finishes[0].stop_reason == "error"
+    assert [message.role for message in runtime.messages] == ["user"]
+    await runtime.close()
+
+
+async def test_no_retry_after_partial_reasoning(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [[ReasoningDelta("thinking"), ProviderError("rate limited", "retryable")]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 1
+    assert any(isinstance(event, AgentError) for event in events)
+    await runtime.close()
+
+
+async def test_tool_call_blocks_retry(tmp_path: Path) -> None:
+    echo = EchoTool()
+    provider = FakeProvider(
+        [[ToolCall("t1", "Echo", {"text": "hi"}), ProviderError("rate limited", "retryable")]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[echo])
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 1
+    assert echo.calls == []
+    assert sum(isinstance(event, AgentToolStarted) for event in events) == 1
+    assert any(isinstance(event, AgentError) for event in events)
+    assert [message.role for message in runtime.messages] == ["user"]
+    await runtime.close()
+
+
+async def test_empty_delta_still_retries(tmp_path: Path, monkeypatch) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    provider = FakeProvider(
+        [[TextDelta(""), ProviderError("rate limited", "retryable")], [text_response("ok")]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 2
+    assert not any(isinstance(event, AgentError) for event in events)
+    await runtime.close()
+
+
+async def test_post_completion_error_is_ignored(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [[text_response("hi"), ProviderError("rate limited", "retryable")]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 1
+    assert not any(isinstance(event, AgentError) for event in events)
+    assert [message.role for message in runtime.messages] == ["user", "assistant"]
+    await runtime.close()
+
+
+async def test_context_length_after_partial_is_not_retried(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [[TextDelta("partial"), ProviderError("prompt too long", "context_length")]]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert len(provider.requests) == 1
+    assert any(isinstance(event, AgentError) for event in events)
     await runtime.close()
