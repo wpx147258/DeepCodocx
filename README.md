@@ -151,11 +151,15 @@ Sessions, memory, and session spill files live under
 `@include` paths in project instructions are restricted to the workspace; includes in
 the global config `AGENTS.md` are restricted to the config directory.
 
-## Learn
+## Docs
 
-- [01 · 一次流式工具调用：从 SSE 到 ToolResultBlock](learn/01_streaming_tool_call.md)
+- [01 · 一次流式工具调用：从 SSE 到 ToolResultBlock](docs/learn/01_streaming_tool_call.md)
   —— 模型、API、SSE、SDK、adapter、runtime、ToolExecutor 的完整路径；以及为什么内部
   Block/Delta 不直接使用 SDK 类型。
+- [Stability hardening plan](docs/plan/stability-hardening.md)
+  —— P0/P1 稳定性工作项、测试与验收标准。
+- [Review notes](docs/revision/REVISION_SUGGESTIONS.recovered.md)
+  —— 独立审稿与当前修复状态。
 
 ## System prompt
 
