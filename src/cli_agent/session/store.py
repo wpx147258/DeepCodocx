@@ -47,7 +47,7 @@ class SessionStore:
         self.paths = paths
         self.persist = persist
         self._lock: FileLock | None = None
-        self._ephemeral = not persist
+        self._ephemeral = False
         self.session_id = paths.root.name
 
     @classmethod
@@ -64,7 +64,11 @@ class SessionStore:
             session_id = new_session_id()
             paths = SessionPaths.for_session(app_paths, session_id)
             store = cls(paths, persist=True)
-            store._open_for_write(provider=provider, model=model, cwd=cwd)
+            try:
+                store._open_for_write(provider=provider, model=model, cwd=cwd)
+            except BaseException:
+                store.close()
+                raise
             return store
 
         root = Path(tempfile.mkdtemp(prefix="cli-agent-session-"))
@@ -77,7 +81,9 @@ class SessionStore:
             spills=root / "spills",
             archive=root / "archive",
         )
-        return cls(paths, persist=False)
+        store = cls(paths, persist=False)
+        store._ephemeral = True
+        return store
 
     @classmethod
     def resume(
@@ -92,7 +98,11 @@ class SessionStore:
         store = cls(paths, persist=persist)
         if persist:
             store._acquire_lock()
-        loaded = store._load()
+        try:
+            loaded = store._load()
+        except BaseException:
+            store.close()
+            raise
         return store, loaded
 
     @property

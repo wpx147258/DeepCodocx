@@ -7,11 +7,13 @@ to know which provider, store, or tool set is in use, look here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .config import AppConfig, load_config
 from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
@@ -88,6 +90,29 @@ async def _complete_request(
     if last is not None:
         raise last
     return ""
+
+
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _close_provider_best_effort(provider: Provider) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        with contextlib.suppress(Exception):
+            asyncio.run(provider.aclose())
+        return
+    task = loop.create_task(provider.aclose())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_background_task_done)
+
+
+def _background_task_done(task: asyncio.Task[Any]) -> None:
+    _BACKGROUND_TASKS.discard(task)
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        task.exception()
 
 
 def _make_completer(slot: ProviderSlot) -> Callable[[str, int], Awaitable[str]]:
@@ -187,12 +212,12 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         provider_name = config.default_provider
         model_name = config.default_model
 
-    provider_config = config.provider(provider_name)
-    model_name = model_name or provider_config.default_model
-
-    thinking_enabled = config.thinking_for(provider_name)
-    thinking = ThinkingConfig(config.thinking_budget) if thinking_enabled else None
+    provider = None
     try:
+        provider_config = config.provider(provider_name)
+        model_name = model_name or provider_config.default_model
+        thinking_enabled = config.thinking_for(provider_name)
+        thinking = ThinkingConfig(config.thinking_budget) if thinking_enabled else None
         provider, profile = build_provider(
             config,
             provider_name=provider_name,
@@ -200,21 +225,26 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             thinking_budget=config.thinking_budget if thinking_enabled else None,
             env=env,
         )
-    except Exception:
+    except BaseException:
         if store is not None:
-            store.close()
+            with contextlib.suppress(Exception):
+                store.close()
         raise
 
     slot = ProviderSlot(provider, profile, thinking)
 
     if store is None:
-        store = SessionStore.new(
-            config.paths,
-            provider=profile.provider_name,
-            model=profile.model,
-            cwd=cwd,
-            persist=options.persist,
-        )
+        try:
+            store = SessionStore.new(
+                config.paths,
+                provider=profile.provider_name,
+                model=profile.model,
+                cwd=cwd,
+                persist=options.persist,
+            )
+        except BaseException:
+            _close_provider_best_effort(provider)
+            raise
 
     memory_enabled = config.memory_enabled and options.persist
     skill_loader = SkillLoader.from_paths(

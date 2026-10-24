@@ -273,3 +273,56 @@ def test_oversized_json_integer_is_skipped(tmp_path: Path) -> None:
         assert loaded.degraded
     finally:
         resumed.close()
+
+
+def test_resume_unreadable_jsonl_releases_lock(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    session_id = store.session_id
+    store.close()
+
+    original = store.jsonl_path.read_bytes()
+    store.jsonl_path.write_bytes(b"\xff\xfe\x00")
+    with pytest.raises(UnicodeDecodeError):
+        SessionStore.resume(paths, session_id)
+
+    store.jsonl_path.write_bytes(original)
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+    finally:
+        resumed.close()
+
+
+def test_resume_non_persistent_does_not_delete_session(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id, persist=False)
+    resumed.close()
+    assert loaded.messages[0].text() == "kept"
+    assert store.jsonl_path.exists()
+
+
+def test_store_close_is_idempotent(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    session_id = store.session_id
+    store.close()
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages == ()
+    finally:
+        resumed.close()
