@@ -1,0 +1,37 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // Interactive REPL: entry point is cli_agent/entry.py:main, reached
+            // through the click command installed as the `cli-agent` script.
+            "name": "cli-agent REPL",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "module": "cli_agent",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            // input() needs a real terminal, so the internal console will not work.
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            }
+        },
+        {
+            // Same entry point in one-shot mode; edit the prompt as needed.
+            "name": "cli-agent print mode",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "module": "cli_agent",
+            "args": ["-p", "reply with the word pong"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            }
+        }
+    ]
+}

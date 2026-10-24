@@ -169,7 +169,7 @@ def test_deepseek_defaults_to_flash_and_thinking(tmp_path: Path) -> None:
     assert config.thinking_enabled is None
     assert config.thinking_for("deepseek") is True
     assert config.thinking_for("anthropic") is False
-    assert config.models["deepseek-flash[1M]"].context_window == 1_000_000
+    assert "deepseek-flash[1M]" not in config.models
 
 
 def test_explicit_thinking_false_overrides_provider_default(tmp_path: Path) -> None:
@@ -182,7 +182,7 @@ def test_explicit_thinking_false_overrides_provider_default(tmp_path: Path) -> N
     assert config.thinking_for("deepseek") is False
 
 
-def test_model_override_preserves_builtin_fields(tmp_path: Path) -> None:
+def test_model_override_holds_only_explicit_fields(tmp_path: Path) -> None:
     config_dir = tmp_path / "config" / "cli-agent"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
@@ -191,7 +191,7 @@ def test_model_override_preserves_builtin_fields(tmp_path: Path) -> None:
     )
     config = load_config(cwd=tmp_path, env=_env(tmp_path))
     model = config.models["deepseek-flash[1M]"]
-    assert model.context_window == 1_000_000
+    assert model.context_window is None
     assert model.max_output_tokens == 4096
 
 

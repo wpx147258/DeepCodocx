@@ -59,7 +59,7 @@ def test_thinking_budget_must_fit_max_output(tmp_path: Path) -> None:
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 thinking_enabled=True,
-                thinking_budget=20_000,
+                thinking_budget=200_000,
                 persist=False,
                 cwd=tmp_path,
                 env=_env(tmp_path, ANTHROPIC_API_KEY="sk-test"),
@@ -80,6 +80,36 @@ async def test_deepseek_defaults_to_thinking(tmp_path: Path) -> None:
         assert bundle.profile.model == "deepseek-flash[1M]"
         assert bundle.runtime.thinking == ThinkingConfig(4_096)
         assert bundle.profile.replay_reasoning
+    finally:
+        await bundle.runtime.close()
+
+
+async def test_provider_limits_are_not_shadowed_by_model_presets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        """
+[providers.deepseek]
+context_window = 880000
+max_output_tokens = 256000
+
+[thinking]
+budget_tokens = 100000
+""",
+        encoding="utf-8",
+    )
+    bundle = build_runtime(
+        BuildOptions(
+            provider="deepseek",
+            persist=False,
+            cwd=tmp_path,
+            env=_env(tmp_path, DEEPSEEK_API_KEY="sk-test"),
+        )
+    )
+    try:
+        assert bundle.profile.context_window == 880_000
+        assert bundle.profile.max_output_tokens == 256_000
+        assert bundle.runtime.thinking == ThinkingConfig(100_000)
     finally:
         await bundle.runtime.close()
 

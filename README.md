@@ -50,15 +50,15 @@ kind = "anthropic_compat"
 base_url = "https://api.deepseek.com/anthropic"
 api_key_env = ["DEEPSEEK_API_KEY"]
 default_model = "deepseek-flash[1M]"
-context_window = 1000000
-max_output_tokens = 8192
+context_window = 880000
+max_output_tokens = 256000
 supports_thinking = true
 thinking_by_default = true
 
 [thinking]
 # Leave enabled unset to use the provider default (DeepSeek: on).
 # enabled = false
-budget_tokens = 4096  # must be below max_output_tokens
+budget_tokens = 100000  # must be below max_output_tokens
 
 [memory]
 enabled = true

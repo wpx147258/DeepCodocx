@@ -171,22 +171,14 @@ class AppConfig:
         )
 
 
-BUILTIN_MODELS: dict[str, ModelConfig] = {
-    "deepseek-flash[1M]": ModelConfig(
-        context_window=1_000_000,
-        max_output_tokens=8_192,
-    ),
-}
-
-
 BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
     "anthropic": ProviderConfig(
         name="anthropic",
         base_url=None,
         api_key_env=("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         default_model="claude-sonnet-4-6",
-        context_window=200_000,
-        max_output_tokens=16_384,
+        context_window=256_000,
+        max_output_tokens=128_000,
         supports_images=True,
         supports_thinking=True,
     ),
@@ -196,7 +188,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         api_key_env=("DEEPSEEK_API_KEY",),
         default_model="deepseek-flash[1M]",
         context_window=1_000_000,
-        max_output_tokens=8_192,
+        max_output_tokens=128_000,
         # Verified against DeepSeek's Anthropic-compatible endpoint.
         supports_thinking=True,
         thinking_by_default=True,
@@ -206,24 +198,24 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         base_url="https://api.moonshot.cn/anthropic",
         api_key_env=("MOONSHOT_API_KEY",),
         default_model="kimi-k2.7-code",
-        context_window=128_000,
-        max_output_tokens=8_192,
+        context_window=512_000,
+        max_output_tokens=128_000,
     ),
     "minimax": ProviderConfig(
         name="minimax",
         base_url="https://api.minimax.com/anthropic",
         api_key_env=("MINIMAX_API_KEY",),
         default_model="MiniMax-M3",
-        context_window=128_000,
-        max_output_tokens=8_192,
+        context_window=512_000,
+        max_output_tokens=128_000,
     ),
     "glm": ProviderConfig(
         name="glm",
         base_url="https://open.bigmodel.cn/api/anthropic",
         api_key_env=("GLM_API_KEY", "ZHIPU_API_KEY"),
         default_model="glm-5.2",
-        context_window=128_000,
-        max_output_tokens=8_192,
+        context_window=512_000,
+        max_output_tokens=128_000,
     ),
 }
 
@@ -256,7 +248,10 @@ def load_config(
         base = providers.get(name, ProviderConfig(name=name))
         providers[name] = _merge_provider(base, raw)
 
-    models: dict[str, ModelConfig] = dict(BUILTIN_MODELS)
+    # Per-model settings come only from the user's config; provider presets own
+    # the defaults. A builtin model table here would silently shadow explicit
+    # [providers.*] values (see build_profile).
+    models: dict[str, ModelConfig] = {}
     raw_models = data.get("models", {})
     if not isinstance(raw_models, dict):
         raise ConfigError("[models] must be a table")
