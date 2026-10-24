@@ -121,7 +121,8 @@ def test_project_memory_and_skills_sections(tmp_path: Path) -> None:
     text = "\n\n".join(section.text for section in sections)
     assert "Use tabs." in text
     assert "Be terse." in text
-    assert "deploy: Deploy the app" in text
+    assert "deploy [global]: Deploy the app" in text
+    assert "untrusted" in text
 
 
 def test_agent_name_is_configurable(tmp_path: Path) -> None:

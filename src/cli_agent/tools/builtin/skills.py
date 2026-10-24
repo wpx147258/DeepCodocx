@@ -15,7 +15,7 @@ from ..base import ToolContext, ToolResult, ToolSpec
 class SkillSource(Protocol):
     def load(self, name: str) -> str: ...
 
-    def catalog_lines(self) -> list[str]: ...
+    def catalog_lines(self, limit: int | None = None) -> list[str]: ...
 
 
 class LoadSkillTool:
@@ -44,9 +44,11 @@ class LoadSkillTool:
         try:
             text = self._source.load(name)
         except KeyError:
-            catalog = self._source.catalog_lines()
+            catalog = self._source.catalog_lines(limit=50)
             available = "\n".join(catalog) if catalog else "(no skills installed)"
             return ToolResult.error(
                 f"Error: unknown skill {name!r}. Available skills:\n{available}"
             )
+        except OSError as exc:
+            return ToolResult.error(f"Error: could not read skill {name!r}: {exc}")
         return ToolResult.text(text)
