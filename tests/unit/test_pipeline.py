@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli_agent.context.pipeline import ContextPipeline
+import pytest
+
+from cli_agent.context.pipeline import SUMMARY_MAX_TOKENS, ContextPipeline
 from cli_agent.context.spill import SpillStore
 from cli_agent.context.tokens import TokenEstimator
 from cli_agent.messages import (
@@ -44,13 +46,18 @@ def _profile(context_window: int, max_output: int = 1_000) -> ModelProfile:
     )
 
 
-def _pipeline(root: Path, *, checkpoint=None) -> ContextPipeline:
+def _pipeline(
+    root: Path,
+    *,
+    checkpoint=None,
+    summarize=_summarize,
+) -> ContextPipeline:
     paths = _paths(root)
     return ContextPipeline(
         estimator=TokenEstimator(),
         spill=SpillStore(paths.spills),
         session_paths=paths,
-        summarize=_summarize,
+        summarize=summarize,
         checkpoint=checkpoint,
     )
 
@@ -177,3 +184,78 @@ async def test_force_compact_works_when_whole_view_fits_window(tmp_path: Path) -
     )
     assert prepared.checkpoint is not None
     assert prepared.messages[0].text().startswith("[Compacted context]")
+
+
+def _long_history() -> list:
+    return [
+        user_message("start"),
+        *[assistant_message([TextBlock("z" * 6_000)]) for _ in range(8)],
+    ]
+
+
+def _recording_summarize(calls: list[int]):
+    async def summarize(text: str, max_tokens: int) -> str:
+        calls.append(max_tokens)
+        return "SUMMARY"
+
+    return summarize
+
+
+@pytest.mark.parametrize("max_output", [0, 63])
+async def test_summary_skips_when_output_limit_is_too_small(
+    tmp_path: Path, max_output: int
+) -> None:
+    calls: list[int] = []
+    pipeline = _pipeline(
+        tmp_path / "session", summarize=_recording_summarize(calls)
+    )
+    prepared = await pipeline.prepare(
+        Transcript(_long_history()),
+        "start",
+        _profile(20_000, max_output=max_output),
+        force_compact=True,
+    )
+    skipped = [
+        event
+        for event in prepared.events
+        if event.kind == "compact_skipped" and "output limit" in event.detail
+    ]
+    assert len(skipped) == 1
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("max_output", "expected"),
+    [(64, 64), (512, 512), (16_384, SUMMARY_MAX_TOKENS)],
+)
+async def test_summary_request_is_capped_to_profile(
+    tmp_path: Path, max_output: int, expected: int
+) -> None:
+    calls: list[int] = []
+    pipeline = _pipeline(
+        tmp_path / "session", summarize=_recording_summarize(calls)
+    )
+    prepared = await pipeline.prepare(
+        Transcript(_long_history()),
+        "start",
+        _profile(200_000, max_output=max_output),
+        force_compact=True,
+    )
+    assert calls == [expected]
+    assert any(event.kind == "compact" for event in prepared.events)
+
+
+async def test_reactive_skip_is_reported_once(tmp_path: Path) -> None:
+    calls: list[int] = []
+    pipeline = _pipeline(
+        tmp_path / "session", summarize=_recording_summarize(calls)
+    )
+    prepared = await pipeline.prepare(
+        Transcript(_long_history()),
+        "start",
+        _profile(20_000, max_output=32),
+        force_compact=True,
+        reactive=True,
+    )
+    assert sum(event.kind == "compact_skipped" for event in prepared.events) == 1
+    assert calls == []

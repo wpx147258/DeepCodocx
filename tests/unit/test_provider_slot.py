@@ -105,3 +105,42 @@ async def test_switch_model_disables_image_input(tmp_path: Path) -> None:
     assert result.content[0].text == IMAGE_UNSUPPORTED_NOTE
     assert not any(isinstance(block, ImageBlock) for block in result.content)
     await runtime.close()
+
+
+async def test_completer_caps_max_tokens_to_profile() -> None:
+    provider = FakeProvider([[text_response("one")], [text_response("two")]])
+    profile = ModelProfile("mock", "anthropic_compat", "model-1", 1_000, 128)
+    slot = ProviderSlot(provider, profile)
+    complete = _make_completer(slot)
+
+    assert await complete("hi", 2_000) == "one"
+    assert await complete("hi", 64) == "two"
+    assert provider.requests[0].max_output_tokens == 128
+    assert provider.requests[1].max_output_tokens == 64
+
+
+async def test_completer_skips_when_output_limit_is_too_small() -> None:
+    provider = FakeProvider([])
+    profile = ModelProfile("mock", "anthropic_compat", "model-1", 1_000, 32)
+    complete = _make_completer(ProviderSlot(provider, profile))
+
+    assert await complete("hi", 2_000) == ""
+    assert provider.requests == []
+
+
+async def test_completer_follows_profile_output_limits() -> None:
+    provider = FakeProvider([[text_response("one")], [text_response("two")]])
+    slot = ProviderSlot(
+        provider, ModelProfile("mock", "anthropic_compat", "model-1", 1_000, 2_000)
+    )
+    complete = _make_completer(slot)
+
+    assert await complete("hi", 2_000) == "one"
+    slot.replace(
+        provider,
+        ModelProfile("mock", "anthropic_compat", "model-2", 1_000, 128),
+        None,
+    )
+    assert await complete("hi", 2_000) == "two"
+    assert provider.requests[0].max_output_tokens == 2_000
+    assert provider.requests[1].max_output_tokens == 128

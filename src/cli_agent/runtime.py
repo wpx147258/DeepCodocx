@@ -357,7 +357,9 @@ class AgentRuntime:
             self._deps.session.save_context(prepared.checkpoint.to_dict())
         for event in prepared.events:
             yield AgentContextEvent(event.kind, event.detail)
-        if prepared.checkpoint is None:
+        if prepared.checkpoint is None and not any(
+            event.kind == "compact_skipped" for event in prepared.events
+        ):
             yield AgentNotice("Nothing to compact.")
 
     async def clear(self) -> None:

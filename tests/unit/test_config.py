@@ -11,6 +11,7 @@ from cli_agent.config import (
     resolve_base_url,
 )
 from cli_agent.errors import ConfigError
+from cli_agent.providers.factory import build_profile
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -235,3 +236,17 @@ def test_max_turns_zero_is_rejected(tmp_path: Path) -> None:
     (config_dir / "config.toml").write_text("max_turns = 0", encoding="utf-8")
     with pytest.raises(ConfigError, match="max_turns"):
         load_config(cwd=tmp_path, env=_env(tmp_path))
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_non_positive_max_output_tokens_is_rejected(
+    tmp_path: Path, value: int
+) -> None:
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        f"[providers.deepseek]\nmax_output_tokens = {value}\n", encoding="utf-8"
+    )
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    with pytest.raises(ConfigError, match="max_output_tokens"):
+        build_profile(config, config.providers["deepseek"], "deepseek-chat")

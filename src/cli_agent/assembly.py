@@ -17,7 +17,11 @@ from typing import Any
 
 from .config import AppConfig, load_config
 from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
-from .context.pipeline import ContextCheckpoint, ContextPipeline
+from .context.pipeline import (
+    MIN_HELPER_OUTPUT_TOKENS,
+    ContextCheckpoint,
+    ContextPipeline,
+)
 from .context.prompts import PromptBuilder, load_project_instructions
 from .context.skills import SkillLoader
 from .context.spill import SpillStore
@@ -118,14 +122,20 @@ def _background_task_done(task: asyncio.Task[Any]) -> None:
 def _make_completer(slot: ProviderSlot) -> Callable[[str, int], Awaitable[str]]:
     """Create a tool-free helper caller bound to the current provider slot."""
 
-    async def complete(prompt: str, max_tokens: int) -> str:
+    async def complete(prompt: str, max_output_tokens: int) -> str:
         profile = slot.profile
+        if profile.max_output_tokens < MIN_HELPER_OUTPUT_TOKENS:
+            logger.info(
+                "skipping helper request: model output limit is too small (%d)",
+                profile.max_output_tokens,
+            )
+            return ""
         request = ModelRequest(
             model=profile.model,
             system=(SystemSection("summarizer", _SUMMARIZER_SYSTEM),),
             messages=(user_message(prompt),),
             tools=(),
-            max_output_tokens=max_tokens,
+            max_output_tokens=min(max_output_tokens, profile.max_output_tokens),
             profile=profile,
         )
         return await _complete_request(slot.provider, request)

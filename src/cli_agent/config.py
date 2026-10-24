@@ -321,6 +321,7 @@ def _merge_provider(base: ProviderConfig, raw: Mapping[str, Any]) -> ProviderCon
         raise ConfigError(f"providers.{base.name}.api_key_env must be a string or list")
 
     base_url = raw.get("base_url", base.base_url)
+    max_output_tokens = _optional_int(raw, "max_output_tokens")
     return ProviderConfig(
         name=base.name,
         kind=kind,
@@ -328,7 +329,11 @@ def _merge_provider(base: ProviderConfig, raw: Mapping[str, Any]) -> ProviderCon
         api_key_env=api_key_env or (),
         default_model=str(raw.get("default_model", base.default_model)),
         context_window=_optional_int(raw, "context_window") or base.context_window,
-        max_output_tokens=_optional_int(raw, "max_output_tokens") or base.max_output_tokens,
+        max_output_tokens=(
+            max_output_tokens
+            if max_output_tokens is not None
+            else base.max_output_tokens
+        ),
         supports_images=bool(raw.get("supports_images", base.supports_images)),
         supports_thinking=bool(raw.get("supports_thinking", base.supports_thinking)),
         thinking_by_default=bool(

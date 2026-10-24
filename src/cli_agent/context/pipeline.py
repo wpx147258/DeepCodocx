@@ -43,6 +43,8 @@ SNIP_TARGET = 0.55
 SUMMARY_TRIGGER = 0.85
 SUMMARY_TARGET = 0.30
 SUMMARY_MAX_TOKENS = 2_000
+# Below this, a helper call cannot return a usable summary or JSON record.
+MIN_HELPER_OUTPUT_TOKENS = 64
 REACTIVE_KEEP_MESSAGES = 5
 MIN_TAIL_MESSAGES = 4
 _SPILL_PREFIX = "[tool output spilled:"
@@ -140,30 +142,47 @@ class ContextPipeline:
                 view = applied
 
         budget = max(1_000, profile.context_window - profile.max_output_tokens - 4_096)
+        summary_max_output_tokens = min(SUMMARY_MAX_TOKENS, profile.max_output_tokens)
 
         view = self._spill_latest_batch(view, budget, events)
         view = self._prune_old_results(view, budget, events)
         view = self._snip(view, budget, active_request, events)
 
         size = self.estimator.estimate_messages(view)
-        if force_compact or size > budget * SUMMARY_TRIGGER:
-            result = await self._summarize_view(
-                view, active_request, budget, target_fraction=SUMMARY_TARGET, events=events
-            )
-            if result is not None:
-                view, changed_checkpoint = result
+        wants_summary = force_compact or size > budget * SUMMARY_TRIGGER
+        if summary_max_output_tokens < MIN_HELPER_OUTPUT_TOKENS:
+            if wants_summary or reactive:
+                events.append(
+                    ContextEvent(
+                        "compact_skipped",
+                        "model output limit is too small to summarize",
+                    )
+                )
+        else:
+            if wants_summary:
+                result = await self._summarize_view(
+                    view,
+                    active_request,
+                    budget,
+                    target_fraction=SUMMARY_TARGET,
+                    events=events,
+                    max_output_tokens=summary_max_output_tokens,
+                )
+                if result is not None:
+                    view, changed_checkpoint = result
 
-        if reactive and changed_checkpoint is None:
-            result = await self._summarize_view(
-                view,
-                active_request,
-                budget,
-                target_fraction=0.0,
-                events=events,
-                keep_messages=REACTIVE_KEEP_MESSAGES,
-            )
-            if result is not None:
-                view, changed_checkpoint = result
+            if reactive and changed_checkpoint is None:
+                result = await self._summarize_view(
+                    view,
+                    active_request,
+                    budget,
+                    target_fraction=0.0,
+                    events=events,
+                    max_output_tokens=summary_max_output_tokens,
+                    keep_messages=REACTIVE_KEEP_MESSAGES,
+                )
+                if result is not None:
+                    view, changed_checkpoint = result
 
         return PreparedContext(
             messages=tuple(view),
@@ -319,6 +338,7 @@ class ContextPipeline:
         *,
         target_fraction: float,
         events: list[ContextEvent],
+        max_output_tokens: int,
         keep_messages: int = MIN_TAIL_MESSAGES,
     ) -> tuple[list[Message], ContextCheckpoint] | None:
         keep_start = max(1, len(view) - keep_messages)
@@ -346,7 +366,7 @@ class ContextPipeline:
             events.append(ContextEvent("compact_skipped", "history too short"))
             return None
         try:
-            summary = await self._summarize_fn(text, SUMMARY_MAX_TOKENS)
+            summary = await self._summarize_fn(text, max_output_tokens)
         except Exception as exc:  # noqa: BLE001 - compaction is best effort
             logger.warning("summary compaction failed: %s", exc)
             events.append(ContextEvent("compact_failed", str(exc)))

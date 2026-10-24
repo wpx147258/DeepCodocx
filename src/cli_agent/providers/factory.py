@@ -73,7 +73,7 @@ def build_profile(
     model: str,
 ) -> ModelProfile:
     override = config.models.get(model)
-    return ModelProfile(
+    profile = ModelProfile(
         provider_name=provider_config.name,
         provider_kind="anthropic_compat",
         model=model,
@@ -103,3 +103,8 @@ def build_profile(
             else provider_config.replay_reasoning
         ),
     )
+    if profile.max_output_tokens < 1:
+        raise ConfigError(
+            f"max_output_tokens for model {model!r} must be at least 1"
+        )
+    return profile
