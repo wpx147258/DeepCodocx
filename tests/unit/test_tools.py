@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+import sys
 from pathlib import Path
 
 from cli_agent.tools.base import ToolContext
@@ -82,3 +84,63 @@ async def test_read_missing_file_is_an_error(tmp_path: Path) -> None:
 async def test_bash_reports_exit_code_marker(tmp_path: Path) -> None:
     result = await BashTool().run({"command": "exit 7"}, _ctx(tmp_path))
     assert "[exit code: 7]" in result.text_content()
+
+
+async def test_bash_large_output_is_truncated(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    python = shlex.quote(sys.executable)
+    result = await BashTool().run(
+        {
+            "command": f"{python} -c \"import sys; sys.stdout.write('x' * 200000)\"",
+            "timeout": 10,
+        },
+        ctx,
+    )
+    assert not result.is_error
+    text = result.text_content()
+    assert "bytes omitted" in text
+    assert "[output truncated; command terminated]" in text
+    assert "[exit code: -9]" not in text
+    assert len(text) < 60_000
+
+
+async def test_bash_timeout_returns_error(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    result = await BashTool().run(
+        {
+            "command": f"{shlex.quote(sys.executable)} -c \"import time; time.sleep(5)\"",
+            "timeout": 1,
+        },
+        ctx,
+    )
+    assert result.is_error
+    assert "timed out" in result.text_content()
+
+
+async def test_bash_stderr_only_overflow(tmp_path: Path) -> None:
+    python = shlex.quote(sys.executable)
+    result = await BashTool().run(
+        {
+            "command": f"{python} -c \"import sys; sys.stderr.write('e' * 200000)\"",
+            "timeout": 10,
+        },
+        _ctx(tmp_path),
+    )
+    assert not result.is_error
+    assert "bytes omitted" in result.text_content()
+
+
+async def test_bash_binary_output_is_bounded(tmp_path: Path) -> None:
+    python = shlex.quote(sys.executable)
+    result = await BashTool().run(
+        {
+            "command": (
+                f"{python} -c \"import sys; "
+                "sys.stdout.buffer.write(bytes(range(256)) * 400)\""
+            ),
+            "timeout": 10,
+        },
+        _ctx(tmp_path),
+    )
+    assert not result.is_error
+    assert len(result.text_content()) < 60_000
