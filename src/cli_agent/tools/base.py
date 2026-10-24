@@ -19,6 +19,7 @@ class ToolSpec:
     input_schema: Mapping[str, Any]
     category: ToolCategory = "meta"
     path_arg: str | None = None
+    scope_arg: str | None = None
     concurrency_safe: bool = False
 
 

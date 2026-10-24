@@ -64,6 +64,7 @@ class BashTool:
             "additionalProperties": False,
         },
         category="shell",
+        scope_arg="command",
     )
 
     async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:

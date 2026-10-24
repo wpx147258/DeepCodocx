@@ -204,9 +204,11 @@ mode, tool search, OpenAI-compatible adapter, and a public plugin SDK.
 
 Notes: compaction and memory extraction are best-effort; on a clean REPL exit the
 runtime waits briefly for in-flight extraction. Permission rules are approval UX,
-not a sandbox — use an external sandbox for untrusted work. DeepSeek-compatible
-endpoints may emit reasoning even without `--extended-thinking`; the display flag
-still controls whether it is shown.
+not a sandbox — shell allow rules are skipped for commands containing common
+composition operators or launchers, quoted operators are treated conservatively,
+and `always` is scoped to the exact command/path/tool. Use an external sandbox for
+untrusted work. DeepSeek-compatible endpoints may emit reasoning even without
+`--extended-thinking`; the display flag still controls whether it is shown.
 
 ## Development
 
