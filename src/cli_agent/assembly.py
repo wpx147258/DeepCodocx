@@ -271,6 +271,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         cwd=config.paths.cwd,
         session_id=store.session_id,
         data_dir=config.paths.project_dir,
+        supports_images=profile.supports_images,
     )
     estimator = TokenEstimator()
     spill = SpillStore(store.spills_dir)

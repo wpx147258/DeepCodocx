@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import base64
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from cli_agent.messages import IMAGE_UNSUPPORTED_NOTE, ImageBlock
 from cli_agent.tools.base import ToolContext
 from cli_agent.tools.builtin.bash import BashTool
-from cli_agent.tools.builtin.files import EditTool, ReadTool, WriteTool
+from cli_agent.tools.builtin.files import (
+    MAX_IMAGE_BYTES,
+    EditTool,
+    ReadTool,
+    WriteTool,
+)
 from cli_agent.tools.builtin.search import GlobTool, GrepTool
 
 
@@ -144,3 +154,57 @@ async def test_bash_binary_output_is_bounded(tmp_path: Path) -> None:
     )
     assert not result.is_error
     assert len(result.text_content()) < 60_000
+
+
+async def test_read_image_omits_base64_when_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"\x89PNG\r\n\x1a\nnot-really-a-png"
+    (tmp_path / "pic.png").write_bytes(payload)
+    reads: list[Path] = []
+    original = Path.read_bytes
+
+    def spy(path: Path) -> bytes:
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", spy)
+    result = await ReadTool().run({"path": "pic.png"}, _ctx(tmp_path))
+    assert not result.is_error
+    assert result.text_content() == IMAGE_UNSUPPORTED_NOTE
+    assert not any(isinstance(block, ImageBlock) for block in result.content)
+    assert reads == []
+
+
+@pytest.mark.parametrize("supported", [False, True])
+async def test_read_image_over_limit_errors(tmp_path: Path, supported: bool) -> None:
+    path = tmp_path / "big.png"
+    path.write_bytes(b"")
+    with path.open("r+b") as handle:
+        handle.truncate(MAX_IMAGE_BYTES + 1)
+    ctx = replace(_ctx(tmp_path), supports_images=supported)
+    result = await ReadTool().run({"path": "big.png"}, ctx)
+    assert result.is_error
+    assert "too large" in result.text_content()
+    assert not any(isinstance(block, ImageBlock) for block in result.content)
+
+
+async def test_read_image_returns_block_when_supported(tmp_path: Path) -> None:
+    payload = b"\x89PNG\r\n\x1a\nnot-really-a-png"
+    (tmp_path / "pic.png").write_bytes(payload)
+    ctx = replace(_ctx(tmp_path), supports_images=True)
+    result = await ReadTool().run({"path": "pic.png"}, ctx)
+    assert not result.is_error
+    images = [block for block in result.content if isinstance(block, ImageBlock)]
+    assert len(images) == 1
+    assert images[0].media_type == "image/png"
+    assert base64.b64decode(images[0].data) == payload
+    assert IMAGE_UNSUPPORTED_NOTE not in result.text_content()
+
+
+async def test_read_text_file_when_images_supported(tmp_path: Path) -> None:
+    (tmp_path / "notes.txt").write_text("hello\n", encoding="utf-8")
+    ctx = replace(_ctx(tmp_path), supports_images=True)
+    result = await ReadTool().run({"path": "notes.txt"}, ctx)
+    assert not result.is_error
+    assert "hello" in result.text_content()

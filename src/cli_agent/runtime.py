@@ -309,11 +309,17 @@ class AgentRuntime:
 
             results: list[ToolResultBlock] = []
             completed: set[str] = set()
+            # The profile can change between calls (for example via /model), so
+            # derive capability from the profile serving this request.
+            tool_context = replace(
+                self._deps.tool_context,
+                supports_images=self._deps.profile.supports_images,
+            )
             try:
                 for call in calls:
                     result = await self._deps.executor.execute(
                         call,
-                        ctx=self._deps.tool_context,
+                        ctx=tool_context,
                         policy=self._deps.policy,
                         asker=self._deps.asker,
                         parse_error=parse_errors.get(call.id),

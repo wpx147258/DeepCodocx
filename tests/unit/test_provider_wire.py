@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from cli_agent.messages import (
+    IMAGE_UNSUPPORTED_NOTE,
     ImageBlock,
     Message,
     ReasoningBlock,
@@ -79,7 +80,7 @@ def test_image_is_downgraded_when_unsupported() -> None:
     )
     wire = _messages_to_wire((message,), _profile())
     assert wire[0]["content"][0]["type"] == "text"
-    assert "image omitted" in wire[0]["content"][0]["text"]
+    assert wire[0]["content"][0]["text"] == IMAGE_UNSUPPORTED_NOTE
 
 
 def test_tool_result_wire_shape() -> None:

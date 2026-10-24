@@ -15,6 +15,7 @@ import anthropic
 from anthropic import AsyncAnthropic
 
 from ..messages import (
+    IMAGE_UNSUPPORTED_NOTE,
     ContentBlock,
     ImageBlock,
     Message,
@@ -235,9 +236,7 @@ def _content_to_wire(
                     }
                 )
             else:
-                wire.append(
-                    {"type": "text", "text": "[image omitted: provider profile does not support images]"}
-                )
+                wire.append({"type": "text", "text": IMAGE_UNSUPPORTED_NOTE})
         elif isinstance(block, ToolUseBlock):
             wire.append(
                 {
@@ -279,10 +278,7 @@ def _result_content_to_wire(
                 "data": block.data,
             },
         }
-    return {
-        "type": "text",
-        "text": "[image omitted: provider profile does not support images]",
-    }
+    return {"type": "text", "text": IMAGE_UNSUPPORTED_NOTE}
 
 
 def _tool_to_wire(tool: Any) -> dict[str, Any]:

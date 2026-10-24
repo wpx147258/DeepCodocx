@@ -91,6 +91,7 @@ def make_runtime(
     max_turns: int = 50,
     checkpoint: Any = None,
     thinking: ThinkingConfig | None = None,
+    profile: ModelProfile | None = None,
 ) -> tuple[AgentRuntime, SessionStore]:
     registry = ToolRegistry()
     for tool in tools or [EchoTool()]:
@@ -118,7 +119,7 @@ def make_runtime(
         summarize=fake_summarize,
         checkpoint=checkpoint,
     )
-    profile = ModelProfile(
+    profile = profile or ModelProfile(
         provider_name="fake",
         provider_kind="anthropic_compat",
         model="fake-model",
@@ -136,7 +137,12 @@ def make_runtime(
         context=pipeline,
         prompt_builder=PromptBuilder(),
         session=session,
-        tool_context=ToolContext(cwd=tmp_path, session_id="test", data_dir=tmp_path),
+        tool_context=ToolContext(
+            cwd=tmp_path,
+            session_id="test",
+            data_dir=tmp_path,
+            supports_images=profile.supports_images,
+        ),
         skills=SkillLoader([]),
         project_instructions="",
         estimator=estimator,
