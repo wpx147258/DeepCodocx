@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import shutil
@@ -130,7 +129,7 @@ class SessionStore:
             "model": model,
             "created_at": now_iso(),
         }
-        append_line(self.paths.jsonl, json.dumps(record, ensure_ascii=False))
+        self._append(record)
         self._write_meta(provider=provider, model=model, cwd=cwd)
 
     def _write_meta(self, *, provider: str, model: str, cwd: Path) -> None:
@@ -141,7 +140,12 @@ class SessionStore:
             "model": model,
             "cwd": str(cwd),
         }
-        atomic_write_text(self.paths.meta, json.dumps(meta, ensure_ascii=False, indent=2))
+        try:
+            atomic_write_text(
+                self.paths.meta, json.dumps(meta, ensure_ascii=False, indent=2)
+            )
+        except OSError as exc:
+            raise SessionError(f"could not write session metadata: {exc}") from exc
 
     def _acquire_lock(self) -> None:
         if self._lock is not None:
@@ -206,17 +210,26 @@ class SessionStore:
         if not self.persist:
             return
         if checkpoint is None:
-            with contextlib.suppress(FileNotFoundError):
+            try:
                 self.paths.context.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise SessionError(
+                    f"could not remove context checkpoint: {exc}"
+                ) from exc
             return
-        atomic_write_text(
-            self.paths.context,
-            json.dumps(
-                {"v": SCHEMA_VERSION, "last_compaction": checkpoint},
-                ensure_ascii=False,
-                indent=2,
-            ),
-        )
+        try:
+            atomic_write_text(
+                self.paths.context,
+                json.dumps(
+                    {"v": SCHEMA_VERSION, "last_compaction": checkpoint},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+        except OSError as exc:
+            raise SessionError(f"could not write context checkpoint: {exc}") from exc
 
     def load_context(self) -> dict[str, Any] | None:
         if not self.paths.context.is_file():
@@ -234,8 +247,10 @@ class SessionStore:
     def _append(self, record: dict[str, Any]) -> None:
         try:
             append_line(self.paths.jsonl, json.dumps(record, ensure_ascii=False))
-        except OSError as exc:
-            raise SessionError(f"could not append session record: {exc}") from exc
+        except (OSError, UnicodeError) as exc:
+            raise SessionError(
+                f"could not append session record to {self.paths.jsonl}: {exc}"
+            ) from exc
 
     def _load(self) -> LoadedSession:
         messages: list[Message] = []

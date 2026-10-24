@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import cli_agent.session.store as store_module
 from cli_agent.config import AppPaths
 from cli_agent.errors import SessionError
 from cli_agent.messages import Usage, user_message
@@ -386,3 +387,34 @@ def test_legacy_clear_without_usage_reset_field_resets_usage(tmp_path: Path) -> 
         assert loaded.usage == Usage()
     finally:
         resumed.close()
+
+
+def test_append_message_wraps_oserror_as_session_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    try:
+        def fail(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(store_module, "append_line", fail)
+        with pytest.raises(SessionError):
+            store.append_message(user_message("hello"))
+    finally:
+        store.close()
+
+
+def test_new_session_wraps_header_append_failure(tmp_path: Path, monkeypatch) -> None:
+    paths = _paths(tmp_path)
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store_module, "append_line", fail)
+    with pytest.raises(SessionError):
+        SessionStore.new(
+            paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+        )
