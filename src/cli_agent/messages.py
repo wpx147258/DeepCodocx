@@ -239,10 +239,17 @@ def usage_to_dict(usage: Usage) -> dict[str, int]:
     }
 
 
+def _usage_int(data: Mapping[str, Any], key: str) -> int:
+    value = data.get(key, 0)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
 def usage_from_dict(data: Mapping[str, Any]) -> Usage:
     return Usage(
-        input_tokens=int(data.get("input_tokens", 0)),
-        output_tokens=int(data.get("output_tokens", 0)),
-        cache_read_tokens=int(data.get("cache_read_tokens", 0)),
-        cache_write_tokens=int(data.get("cache_write_tokens", 0)),
+        input_tokens=_usage_int(data, "input_tokens"),
+        output_tokens=_usage_int(data, "output_tokens"),
+        cache_read_tokens=_usage_int(data, "cache_read_tokens"),
+        cache_write_tokens=_usage_int(data, "cache_write_tokens"),
     )

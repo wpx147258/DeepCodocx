@@ -7,6 +7,7 @@ import json
 import logging
 import shutil
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -245,6 +246,12 @@ class SessionStore:
                     logger.warning("skipping corrupt session line %d", index + 1)
                     degraded = True
                 continue
+            except (ValueError, OverflowError, RecursionError) as exc:
+                # A complete line can still fail json.loads (for example an
+                # integer beyond Python's digit limit). It is not a torn write.
+                logger.warning("skipping unparseable session line %d: %s", index + 1, exc)
+                degraded = True
+                continue
             if not isinstance(record, dict):
                 degraded = True
                 continue
@@ -252,20 +259,46 @@ class SessionStore:
                 logger.warning("ignoring unknown session record version: %r", record.get("v"))
                 continue
             record_type = record.get("type")
-            if record_type == "session":
-                provider = record.get("provider") or provider
-                model = record.get("model") or model
+            if record_type in ("session", "model"):
+                raw_provider = record.get("provider")
+                if raw_provider is not None:
+                    if isinstance(raw_provider, str) and raw_provider:
+                        provider = raw_provider
+                    else:
+                        logger.warning(
+                            "ignoring invalid provider in session line %d", index + 1
+                        )
+                        degraded = True
+                raw_model = record.get("model")
+                if raw_model is not None:
+                    if isinstance(raw_model, str) and raw_model:
+                        model = raw_model
+                    else:
+                        logger.warning(
+                            "ignoring invalid model in session line %d", index + 1
+                        )
+                        degraded = True
             elif record_type == "message":
+                raw_message = record.get("message")
+                if not isinstance(raw_message, Mapping):
+                    logger.warning(
+                        "skipping invalid message record at line %d", index + 1
+                    )
+                    degraded = True
+                    continue
                 try:
-                    messages.append(message_from_dict(record.get("message", {})))
-                except (ValueError, TypeError) as exc:
+                    messages.append(message_from_dict(raw_message))
+                except (ValueError, TypeError, AttributeError) as exc:
                     logger.warning("skipping invalid message record: %s", exc)
                     degraded = True
             elif record_type == "usage":
-                usage = usage + usage_from_dict(record)
-            elif record_type == "model":
-                provider = record.get("provider") or provider
-                model = record.get("model") or model
+                try:
+                    usage = usage + usage_from_dict(record)
+                except (ValueError, TypeError, OverflowError) as exc:
+                    logger.warning(
+                        "skipping invalid usage record at line %d: %s", index + 1, exc
+                    )
+                    degraded = True
             elif record_type == "clear":
                 messages.clear()
             else:
@@ -273,8 +306,12 @@ class SessionStore:
 
         if provider is None or model is None:
             meta = self._read_meta()
-            provider = provider or meta.get("provider")
-            model = model or meta.get("model")
+            meta_provider = meta.get("provider")
+            meta_model = meta.get("model")
+            if provider is None and isinstance(meta_provider, str) and meta_provider:
+                provider = meta_provider
+            if model is None and isinstance(meta_model, str) and meta_model:
+                model = meta_model
 
         return LoadedSession(
             session_id=self.session_id,

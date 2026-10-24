@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -130,3 +131,145 @@ def test_list_sessions_newest_first(tmp_path: Path) -> None:
     ids = list_session_ids(paths)
     assert ids[0] == second_id
     assert first_id in ids
+
+
+def test_corrupt_usage_record_is_skipped(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"v":1,"type":"usage","model":"mock-1",'
+            '"input_tokens":"not-a-number","output_tokens":1}\n'
+        )
+    store.append_usage(Usage(2, 3), "mock-1")
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.usage == Usage(2, 3)
+        assert loaded.degraded
+    finally:
+        resumed.close()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['"x"', "null", "[]", "{}", "NaN", "Infinity", "1e400", "3.9", "true"],
+)
+def test_corrupt_usage_values_are_skipped(tmp_path: Path, raw: str) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"v":1,"type":"usage","model":"mock-1","input_tokens":'
+            + raw
+            + ',"output_tokens":1}\n'
+        )
+    store.append_usage(Usage(2, 3), "mock-1")
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.usage == Usage(2, 3)
+        assert loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_valid_usage_before_corrupt_is_kept(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_usage(Usage(1, 2), "mock-1")
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"v":1,"type":"usage","input_tokens":"bad","output_tokens":1}\n'
+        )
+    store.append_usage(Usage(3, 4), "mock-1")
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.usage == Usage(4, 6)
+        assert loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_corrupt_session_identity_is_ignored(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {"v": 1, "type": "session", "provider": {"x": 1}, "model": ["m"]}
+            )
+            + "\n"
+        )
+    store.append_message(user_message("kept"))
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.provider == "mock"
+        assert loaded.model == "mock-1"
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_corrupt_message_payload_is_skipped(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"v":1,"type":"message","message":null}\n')
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_oversized_json_integer_is_skipped(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    with store.jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '{"v":1,"type":"usage","input_tokens":' + "9" * 5_000 + "}\n"
+        )
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.usage == Usage()
+        assert loaded.degraded
+    finally:
+        resumed.close()
