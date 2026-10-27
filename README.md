@@ -155,7 +155,9 @@ Implemented today:
 - permission modes, allow/deny rules, workspace boundary, interactive and
   fail-closed non-interactive asks, and `/auto` for full-permission mode;
 - append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
-- ordered context compaction (spill, prune, snip, summarize), reactive compaction;
+- ordered context compaction (spill, prune, snip, summarize) and reactive compaction;
+  pruning only replaces tool results that are clearly larger than the disk-pointer
+  preview, so the request actually shrinks;
 - file-backed memory written only by the agent's `Remember` tool (strict admission
   criteria in the tool description and prompt); records are injected into the newest
   user message, so the cached system prefix stays stable. `/memory [list|forget X]`

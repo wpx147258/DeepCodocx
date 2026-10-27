@@ -45,5 +45,8 @@
 - Provider usage: `input_tokens` excludes the cached prefix. Prompt size is
   input + cache_read + cache_write; calibrate the estimator and report context on that
   sum, never on `input_tokens` alone.
+- Every lossy context stage must prove it shrinks the request. Replacing a small tool
+  result with a preview-bearing spill pointer grows the prompt, so prune only results
+  above a size threshold.
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

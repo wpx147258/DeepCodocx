@@ -177,3 +177,29 @@ async def test_force_compact_works_when_whole_view_fits_window(tmp_path: Path) -
     )
     assert prepared.checkpoint is not None
     assert prepared.messages[0].text().startswith("[Compacted context]")
+
+
+async def test_prune_shrinks_the_view_and_skips_small_results(tmp_path: Path) -> None:
+    pipeline = _pipeline(tmp_path / "session")
+    messages = [user_message("start"), *_tool_pair("big", "B" * 40_000)]
+    for index in range(5):
+        messages.extend(_tool_pair(f"small{index}", "s" * 400))
+
+    prepared = await pipeline.prepare(Transcript(messages), "start", _profile(20_000))
+
+    spills = list((tmp_path / "session" / "spills").glob("*.txt"))
+    # Only the large result is worth replacing; small ones would grow into a
+    # 200-token pointer preview.
+    assert len(spills) == 1
+    assert any(
+        event.kind == "prune" and event.detail.startswith("1 ")
+        for event in prepared.events
+    )
+    texts = [
+        block.content[0].text
+        for message in prepared.messages
+        for block in message.tool_results()
+    ]
+    spilled = [text for text in texts if text.startswith("[tool output spilled:")]
+    assert len(spilled) == 1
+    assert sum(text == "s" * 400 for text in texts) == 5

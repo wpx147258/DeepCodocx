@@ -38,6 +38,10 @@ LATEST_BATCH_FRACTION = 0.25
 PRUNE_TRIGGER = 0.60
 PRUNE_TARGET = 0.50
 KEEP_RECENT_RESULTS = 3
+# Replacing a small result with a spill pointer made of a preview can grow
+# the request; only prune results that are clearly larger than the pointer.
+PRUNE_MIN_TOKENS = 600
+PRUNE_PREVIEW_TOKENS = 200
 SNIP_TRIGGER = 0.75
 SNIP_TARGET = 0.55
 SUMMARY_TRIGGER = 0.85
@@ -251,7 +255,11 @@ class ContextPipeline:
             for position, block in enumerate(blocks):
                 if not isinstance(block, ToolResultBlock):
                     continue
-                replacement = self._spill_block(block)
+                if estimate_block(block) <= PRUNE_MIN_TOKENS:
+                    continue
+                replacement = self._spill_block(
+                    block, preview_tokens=PRUNE_PREVIEW_TOKENS
+                )
                 if replacement is not block:
                     blocks[position] = replacement
                     replaced_here += 1
@@ -264,12 +272,14 @@ class ContextPipeline:
             events.append(ContextEvent("prune", f"{changed} older tool result(s) spilled"))
         return view
 
-    def _spill_block(self, block: ToolResultBlock) -> ToolResultBlock:
+    def _spill_block(
+        self, block: ToolResultBlock, *, preview_tokens: int = 1_500
+    ) -> ToolResultBlock:
         text = _result_text(block)
         if not text or text.startswith(_SPILL_PREFIX):
             return block
         path = self.spill.spill(block.tool_use_id, text)
-        pointer = self.spill.pointer(text, path)
+        pointer = self.spill.pointer(text, path, preview_tokens=preview_tokens)
         return ToolResultBlock(
             tool_use_id=block.tool_use_id,
             content=(TextBlock(pointer),),
