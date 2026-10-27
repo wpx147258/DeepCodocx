@@ -183,6 +183,62 @@ def _run_one_shot(common: dict[str, Any], prompt: str, output_format: str) -> in
     )
 
 
+def _run_web(
+    common: dict[str, Any],
+    *,
+    host: str,
+    port: int,
+    open_browser: bool,
+) -> int:
+    from .web.server import WebAsker, serve
+
+    _configure_logging(common["verbose"])
+    asker = WebAsker()
+    options = _build_options(
+        common,
+        persist=True,
+        memory_enabled=False if common["no_memory"] else None,
+        asker=asker,
+    )
+    bundle = _load(options)
+
+    def session_factory(session_id: str | None) -> RuntimeBundle:
+        session_common = {**common, "resume_id": session_id, "fork": False}
+        return build_runtime(
+            _build_options(
+                session_common,
+                persist=True,
+                memory_enabled=False if common["no_memory"] else None,
+                asker=asker,
+            )
+        )
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "warning: the web UI has no authentication; it is exposed to the "
+            f"network on {host}",
+            file=sys.stderr,
+        )
+    serve(
+        bundle,
+        asker,
+        host=host,
+        port=port,
+        open_browser=open_browser,
+        factory=session_factory,
+    )
+    return 0
+
+
+def _merge_common(ctx: click.Context, common: dict[str, Any]) -> None:
+    group = ctx.obj if isinstance(ctx.obj, dict) else {}
+    for key, value in group.items():
+        if key in ("verbose", "no_memory"):
+            common[key] = bool(common.get(key)) or bool(value)
+        elif common.get(key) is None:
+            common[key] = value
+
+
 @click.group(
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -191,7 +247,7 @@ def _run_one_shot(common: dict[str, Any], prompt: str, output_format: str) -> in
 @click.version_option(version=__version__, prog_name="cli-agent")
 @click.pass_context
 def main(ctx: click.Context, **common: Any) -> None:
-    """Start the interactive REPL. Use ``run`` for one-shot output."""
+    """Start the REPL. Use ``run`` for one-shot output or ``web`` for the browser."""
     ctx.obj = common
     if ctx.invoked_subcommand is not None:
         return
@@ -214,12 +270,7 @@ def main(ctx: click.Context, **common: Any) -> None:
 @click.pass_context
 def run(ctx: click.Context, **common: Any) -> None:
     """Run one prompt and exit. Use ``-`` to read the prompt from stdin."""
-    group = ctx.obj if isinstance(ctx.obj, dict) else {}
-    for key, value in group.items():
-        if key in ("verbose", "no_memory"):
-            common[key] = bool(common.get(key)) or bool(value)
-        elif common.get(key) is None:
-            common[key] = value
+    _merge_common(ctx, common)
 
     output_format = common.pop("output_format")
     prompt = common.pop("prompt")
@@ -230,3 +281,45 @@ def run(ctx: click.Context, **common: Any) -> None:
     if not prompt.strip():
         raise click.UsageError("empty prompt")
     raise SystemExit(_run_one_shot(common, prompt, output_format))
+
+
+@main.command("web")
+@_common_options
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    show_default=True,
+    help="Bind address. The web UI has no authentication.",
+)
+@click.option(
+    "--port",
+    type=click.IntRange(1, 65_535),
+    default=8765,
+    show_default=True,
+    help="Port for the local web client.",
+)
+@click.option(
+    "--open/--no-open",
+    "open_browser",
+    default=True,
+    show_default=True,
+    help="Open the browser once the server is listening.",
+)
+@click.pass_context
+def web(
+    ctx: click.Context,
+    host: str,
+    port: int,
+    open_browser: bool,
+    **common: Any,
+) -> None:
+    """Serve the local chat client in a browser."""
+    _merge_common(ctx, common)
+    raise SystemExit(
+        _run_web(
+            common,
+            host=host,
+            port=port,
+            open_browser=open_browser,
+        )
+    )

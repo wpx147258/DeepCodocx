@@ -65,6 +65,40 @@ budget_tokens = 100000  # must be below max_output_tokens
 enabled = true
 ```
 
+## Web client
+
+```bash
+cli-agent web                    # loopback on :8765, opens the browser
+cli-agent web --provider deepseek --no-open
+cli-agent web -c                 # resume the latest session
+```
+
+![cli-agent web client](docs/web/chat-light.png)
+
+[Dark theme](docs/web/chat-dark.png) · [Approval prompt](docs/web/approval.png) ·
+[Mobile](docs/web/mobile.png)
+
+The page is served by `src/cli_agent/web/server.py`, a thin HTTP/SSE adapter over the
+same `AgentRuntime`:
+
+- streaming text, collapsible reasoning, and tool cards with input/output;
+- approval prompts bridged to the browser (deny / allow once / always). High-risk
+  deletes only offer a single approval, matching the CLI guard;
+- Ask/Auto permission toggle, model switcher, context meter, and a compact action;
+- recent chats read from the project's session directory, newest activity first;
+  opening one goes through the normal resume path and creates a fresh runtime;
+- "New chat" creates a new session instead of clearing the current one;
+- cancellation stops the running turn through the runtime, not by killing the server.
+
+Streaming uses server-sent events. Each frame is a JSON object with a `type`:
+`turn_start`, `text`, `reasoning`, `tool_started`, `tool_finished`,
+`permission_request`, `usage`, `context`, `notice`, `retry`, `error`, `cancelled`,
+and `done`.
+
+The server binds to `127.0.0.1` by default and has **no authentication**. It warns on a
+non-local host, but you should still put an authenticated proxy in front before
+exposing it. The page ships with a strict CSP and makes no external requests.
+
 ## Headless output
 
 `cli-agent run` is the one-shot headless mode. Use `run -` to read the prompt
@@ -245,6 +279,8 @@ Implemented today:
 - REPL (`cli-agent`), one-shot (`cli-agent run`), and
   `/help /clear /compact /model /auto /memory /cost /exit`;
   `/clear` starts a new conversation and resets usage, so `/cost` counts from that point;
+- local web client (`cli-agent web`) with streaming chat, browser approval prompts,
+  recent-chat switching, Ask/Auto mode, and cancellation over SSE;
 - headless `--output-format text|json|jsonl` with a stable result schema, clean
   stdout, stderr diagnostics, and non-zero exit on incomplete turns.
 

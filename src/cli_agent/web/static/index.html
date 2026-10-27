@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>cli-agent</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app">
+    <button class="scrim" id="scrim" type="button" aria-label="Close sidebar" hidden></button>
+
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </span>
+        <span class="brand-name">cli-agent</span>
+        <span class="brand-dot" id="connection-dot" title="Connecting"></span>
+        <button class="icon-btn sidebar-close" id="sidebar-close" type="button" aria-label="Close sidebar">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <button class="new-chat" id="new-chat" type="button">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        New chat
+      </button>
+
+      <div class="side-section">
+        <div class="side-label">Chats</div>
+        <div class="chat-list" id="chat-list"></div>
+      </div>
+
+      <div class="side-section side-settings">
+        <div class="side-label">Model</div>
+        <div class="select-wrap">
+          <select id="model-select" aria-label="Model"></select>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+
+        <div class="side-label">Permissions</div>
+        <div class="segmented" id="mode-toggle" role="group" aria-label="Permission mode">
+          <button type="button" data-auto="false">Ask</button>
+          <button type="button" data-auto="true">Auto</button>
+        </div>
+        <p class="side-hint" id="mode-hint">Ask before running tools.</p>
+
+        <div class="side-label">Context</div>
+        <div class="meter" aria-hidden="true"><span id="ctx-bar"></span></div>
+        <div class="meter-text" id="ctx-text">—</div>
+      </div>
+
+      <div class="side-footer">
+        <button class="ghost small" id="theme-toggle" type="button" aria-label="Toggle theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 15.2A8.2 8.2 0 1 1 8.8 4 6.6 6.6 0 0 0 20 15.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          Theme
+        </button>
+        <span class="version" id="version"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu" id="menu" type="button" aria-label="Open sidebar">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+        <div class="top-title">
+          <h1 id="chat-title">New conversation</h1>
+          <span class="top-sub" id="top-sub">workspace</span>
+        </div>
+        <div class="top-actions">
+          <button class="ghost small" id="compact" type="button" title="Summarize older context">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9h16M4 15h16M9 4l-5 5 5 5M15 20l5-5-5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Compact</span>
+          </button>
+          <span class="model-chip" id="model-chip">—</span>
+        </div>
+      </header>
+
+      <div class="transcript" id="transcript" role="log" aria-live="polite" aria-relevant="additions text">
+        <section class="empty" id="empty">
+          <span class="empty-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5v19M3.3 7.2l17.4 9.6M20.7 7.2L3.3 16.8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg>
+          </span>
+          <h2>What are we building?</h2>
+          <p>Ask about the workspace, run commands, or make changes — with approval before anything destructive.</p>
+          <div class="suggestions">
+            <button type="button" data-prompt="Give me a tour of this codebase: entry points, main modules, and how a turn flows.">
+              <strong>Tour this codebase</strong>
+              <span>Entry points, modules, request flow</span>
+            </button>
+            <button type="button" data-prompt="Find a bug or rough edge in this project, explain it, and propose a minimal fix.">
+              <strong>Find a rough edge</strong>
+              <span>Inspect, explain, propose a fix</span>
+            </button>
+            <button type="button" data-prompt="Run the test suite and summarize any failures with likely causes.">
+              <strong>Run the tests</strong>
+              <span>Execute and interpret results</span>
+            </button>
+          </div>
+        </section>
+        <div class="messages" id="messages"></div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="notice-bar" id="notice-bar" hidden>
+          <span id="notice-text"></span>
+          <button type="button" id="notice-close" aria-label="Dismiss">×</button>
+        </div>
+        <form class="composer" id="composer" autocomplete="off">
+          <label class="sr-only" for="input">Message cli-agent</label>
+          <textarea id="input" rows="1" placeholder="Message cli-agent…" spellcheck="true"></textarea>
+          <div class="composer-row">
+            <span class="composer-hint">Enter to send · Shift+Enter for a new line</span>
+            <button class="send" id="send" type="submit" aria-label="Send message" disabled>
+              <svg class="send-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg class="stop-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.6" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </form>
+        <p class="disclaimer">cli-agent can read and change files in your workspace. Review every approval request.</p>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="permission" hidden>
+    <div class="permission" role="dialog" aria-modal="true" aria-labelledby="perm-title">
+      <div class="perm-head">
+        <span class="perm-badge">Approval needed</span>
+        <h2 id="perm-title">Run a tool?</h2>
+      </div>
+      <p class="perm-reason" id="perm-reason"></p>
+      <pre class="perm-input" id="perm-input"></pre>
+      <p class="perm-scope" id="perm-scope"></p>
+      <div class="perm-actions">
+        <button class="ghost" id="perm-deny" type="button">Deny</button>
+        <button class="secondary" id="perm-always" type="button">Always allow</button>
+        <button class="primary" id="perm-allow" type="button" autofocus>Allow once</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <template id="tpl-thinking">
+    <details class="thinking">
+      <summary><span class="thinking-pulse"></span>Thinking</summary>
+      <div class="thinking-text"></div>
+    </details>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

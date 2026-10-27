@@ -53,6 +53,12 @@
 - Headless JSON output is a public surface: stdout carries data only, diagnostics
   go to stderr, and every completed turn ends with a `result` object. Keep event
   and field names stable; use `stop_reason`/`is_complete` for completion.
+- The web host (`src/cli_agent/web/`) is another adapter, not a second agent. It may
+  read runtime state and drive one turn at a time, but never appends messages, edits
+  usage, or bypasses permission policy. Browser permission prompts fail closed when
+  the client disappears or times out. Session switching closes the old runtime and
+  rebuilds through `assembly.py`; the SSE event names are a public surface like JSONL.
+  Serve the page with a strict CSP and keep the default loopback bind.
 
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.
