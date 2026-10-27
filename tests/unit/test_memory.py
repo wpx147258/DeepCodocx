@@ -5,8 +5,11 @@ from pathlib import Path
 from cli_agent.context.memory import (
     MemoryRecord,
     MemoryStore,
+    inject_memory,
     looks_like_secret,
+    memory_note,
 )
+from cli_agent.messages import TextBlock, assistant_message, user_message
 from cli_agent.tools.base import ToolContext
 from cli_agent.tools.builtin.memory import RememberTool
 
@@ -161,3 +164,34 @@ async def test_remember_runs_through_the_agent_loop(tmp_path: Path) -> None:
     assert "Saved memory" in result.content[0].text
     assert "Remember" in [tool.name for tool in provider.requests[0].tools]
     await runtime.close()
+
+
+def test_memory_note_and_injection(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory")
+    assert memory_note(store, "anything") == ""
+
+    store.save(MemoryRecord("prefers-tabs", "indent", "user", "Use tabs."))
+    note = memory_note(store, "indent preference")
+    assert "[Memory]" in note
+    assert "prefers-tabs" in note
+    assert "Use tabs." in note
+
+    messages = (
+        user_message("older"),
+        assistant_message([TextBlock("ok")]),
+        user_message("current"),
+    )
+    view = inject_memory(messages, note)
+    assert "[Memory]" in view[-1].text()
+    assert view[0] is messages[0]
+    assert view[1] is messages[1]
+    # The canonical transcript is never mutated.
+    assert "[Memory]" not in messages[-1].text()
+
+
+def test_note_is_capped(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory")
+    store.save(MemoryRecord("big", "x", "project", "y" * 10_000))
+    note = memory_note(store, "big", max_chars=500)
+    assert len(note) <= 540
+    assert "memory truncated" in note

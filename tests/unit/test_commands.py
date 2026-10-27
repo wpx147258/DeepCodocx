@@ -124,3 +124,43 @@ async def test_cost_shows_context_usage(tmp_path: Path) -> None:
     assert "context: ~" in text
     assert "200000" in text
     await runtime.close()
+
+
+async def test_memory_command_lists_and_forgets(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryRecord, MemoryStore
+
+    store = MemoryStore(tmp_path / "memory")
+    store.save(MemoryRecord("prefers-tabs", "indent preference", "user", "Use tabs."))
+    runtime, _ = make_runtime(FakeProvider([]), tmp_path=tmp_path, memory=store)
+    renderer, output = _renderer()
+    dispatcher = CommandDispatcher()
+
+    await dispatcher.dispatch("/memory", runtime, renderer)
+    assert "prefers-tabs" in output.getvalue()
+
+    await dispatcher.dispatch("/memory forget prefers-tabs", runtime, renderer)
+    assert store.all() == []
+    await dispatcher.dispatch("/memory", runtime, renderer)
+    assert "No saved memories." in output.getvalue()
+    await runtime.close()
+
+
+async def test_memory_command_without_a_store(tmp_path: Path) -> None:
+    runtime, _ = make_runtime(FakeProvider([]), tmp_path=tmp_path)
+    renderer, output = _renderer()
+    dispatcher = CommandDispatcher()
+
+    await dispatcher.dispatch("/memory", runtime, renderer)
+    assert "No saved memories." in output.getvalue()
+    await dispatcher.dispatch("/memory forget anything", runtime, renderer)
+    assert "No memory named" in output.getvalue()
+    await runtime.close()
+
+
+async def test_help_lists_memory(tmp_path: Path) -> None:
+    runtime, _ = make_runtime(FakeProvider([]), tmp_path=tmp_path)
+    renderer, output = _renderer()
+    await CommandDispatcher().dispatch("/help", runtime, renderer)
+    text = output.getvalue()
+    assert "/memory" in text
+    await runtime.close()

@@ -23,6 +23,8 @@ _HELP = """Commands:
   /compact           compact the context now
   /model [NAME]      show or switch model; use provider:model to switch provider
   /auto [on|off]     toggle full-permission mode (no approval prompts)
+  /memory [list]     list saved memories
+  /memory forget X   delete the memory named X
   /cost              show cumulative token usage
   /exit              leave the REPL
 
@@ -60,6 +62,9 @@ class CommandDispatcher:
             return CommandResult(True)
         if name == "auto":
             self._auto(arguments, runtime, renderer)
+            return CommandResult(True)
+        if name == "memory":
+            self._memory(arguments, runtime, renderer)
             return CommandResult(True)
         if name == "cost":
             usage = runtime.usage
@@ -127,6 +132,33 @@ class CommandDispatcher:
             )
         else:
             renderer.notice(f"permission mode: {mode}")
+
+    def _memory(self, argument: str, runtime: AgentRuntime, renderer: Renderer) -> None:
+        action, _, rest = argument.strip().partition(" ")
+        action = action.strip().lower()
+        rest = rest.strip()
+        if action in ("", "list"):
+            records = runtime.memories()
+            if not records:
+                renderer.notice("No saved memories.")
+                return
+            lines = [
+                f"- {record.name} ({record.type})"
+                + (f": {record.description}" if record.description else "")
+                for record in records
+            ]
+            renderer.notice("Saved memories:\n" + "\n".join(lines))
+            return
+        if action == "forget":
+            if not rest:
+                renderer.error("usage: /memory forget <name>")
+                return
+            if runtime.forget_memory(rest):
+                renderer.notice(f"Forgot {rest!r}.")
+            else:
+                renderer.notice(f"No memory named {rest!r}.")
+            return
+        renderer.error("usage: /memory [list|forget <name>]")
 
 
 __all__ = ["CommandDispatcher", "CommandResult", "AgentNotice"]

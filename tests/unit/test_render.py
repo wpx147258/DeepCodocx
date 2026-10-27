@@ -110,3 +110,27 @@ def test_print_marks_failed_stop_reasons(capsys) -> None:
     renderer = PrintRenderer()
     renderer.render(AgentTurnFinished("end_turn", Usage()))
     assert not renderer.failed
+
+
+def test_history_renders_the_resumed_conversation() -> None:
+    from cli_agent.messages import TextBlock, ToolUseBlock, assistant_message, user_message
+
+    messages = (
+        user_message("earlier question"),
+        assistant_message(
+            [TextBlock("earlier answer"), ToolUseBlock("t1", "Bash", {"command": "ls"})]
+        ),
+        user_message("next"),
+    )
+    console, output = _console()
+    Renderer(console=console).history(messages)
+    text = output.getvalue()
+    assert "resumed history" in text
+    assert "earlier question" in text
+    assert "earlier answer" in text
+    assert "Bash" in text
+    assert "end of history" in text
+
+    console, output = _console()
+    Renderer(console=console).history(messages, limit=1)
+    assert "2 earlier message(s) hidden" in output.getvalue()

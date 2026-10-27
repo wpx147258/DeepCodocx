@@ -54,6 +54,11 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
     )
     if bundle.degraded:
         renderer.notice("The resumed session had corrupt records; some were skipped.")
+    if bundle.resumed:
+        if runtime.messages:
+            renderer.history(runtime.messages)
+        else:
+            renderer.notice("Resumed an empty session.")
 
     while True:
         try:

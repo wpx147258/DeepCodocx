@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 from typing import Any
 
 from rich.console import Console
@@ -22,7 +23,7 @@ from ..events import (
     AgentTurnFinished,
     AgentUsage,
 )
-from ..messages import Usage
+from ..messages import Message, TextBlock, ToolResultBlock, ToolUseBlock, Usage
 
 # Stop reasons that mean the turn did not produce a trustworthy answer.
 _FAILED_STOP_REASONS = frozenset({"refusal", "error", "max_turns"})
@@ -50,15 +51,46 @@ class Renderer:
         session_id: str,
         permission_mode: str = "default",
     ) -> None:
+        self.console.print(
+            f"[bold]cli-agent[/bold] · {escape(provider)}/{escape(model)} · "
+            f"session {escape(session_id)}"
+        )
         if permission_mode == "bypass":
             mode = "[yellow]mode: bypass — no approval prompts[/yellow]"
         else:
             mode = f"[dim]mode: {escape(permission_mode)}[/dim]"
         self.console.print(
-            f"[bold]cli-agent[/bold] · {escape(provider)}/{escape(model)} · "
-            f"session {escape(session_id)} · {mode}"
+            f"{mode} [dim]· Type /help for commands, Ctrl+D to exit.[/dim]\n"
         )
-        self.console.print("[dim]Type /help for commands, Ctrl+D to exit.[/dim]\n")
+
+    def history(self, messages: Sequence[Message], *, limit: int = 20) -> None:
+        """Render the tail of a resumed conversation."""
+        if not messages:
+            return
+        hidden = max(0, len(messages) - limit)
+        self._break_line()
+        self.console.print("[dim]── resumed history ──[/dim]")
+        if hidden:
+            self.console.print(f"[dim]... {hidden} earlier message(s) hidden ...[/dim]")
+        for message in messages[-limit:]:
+            role = "you" if message.role == "user" else "assistant"
+            lines: list[str] = []
+            for block in message.content:
+                if isinstance(block, TextBlock) and block.text.strip():
+                    lines.append(escape(_clip(block.text, 400)))
+                elif isinstance(block, ToolUseBlock):
+                    lines.append(
+                        f"[dim]› {escape(block.name)} "
+                        f"{escape(_short_json(block.input, 120))}[/dim]"
+                    )
+                elif isinstance(block, ToolResultBlock):
+                    text = escape(_clip(_short_content(block.content, 200), 200))
+                    style = "red" if block.is_error else "dim"
+                    lines.append(f"[{style}]← {text}[/{style}]")
+            if not lines:
+                continue
+            self.console.print(f"[bold]{role}[/bold] " + "\n  ".join(lines))
+        self.console.print("[dim]── end of history ──[/dim]")
 
     def render(self, event: AgentEvent) -> None:
         if isinstance(event, AgentTextDelta):
@@ -204,6 +236,11 @@ def _short_json(value: Any, limit: int = 160) -> str:
     except (TypeError, ValueError):
         text = str(value)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _clip(text: str, limit: int) -> str:
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else collapsed[:limit] + "…"
 
 
 def _short_content(content: tuple[Any, ...], limit: int = 240) -> str:

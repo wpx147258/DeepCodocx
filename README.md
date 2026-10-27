@@ -157,7 +157,9 @@ Implemented today:
 - append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
 - ordered context compaction (spill, prune, snip, summarize), reactive compaction;
 - file-backed memory written only by the agent's `Remember` tool (strict admission
-  criteria in the tool description and prompt), selected lexically into the prompt;
+  criteria in the tool description and prompt); records are injected into the newest
+  user message, so the cached system prefix stays stable. `/memory [list|forget X]`
+  inspects or removes them;
 - skills from `~/.config/cli-agent/skills` and `.agents/skills`;
 - extended thinking requests for providers that support them (Anthropic and DeepSeek
   presets; opt in another provider with `supports_thinking = true`), with provider
@@ -166,7 +168,7 @@ Implemented today:
   on;
 - streaming reasoning display: on by default in the REPL, off in print mode;
   `--thinking/--no-thinking` overrides it (print mode writes reasoning to stderr);
-- REPL, `-p/--print`, and `/help /clear /compact /model /auto /cost /exit`.
+- REPL, `-p/--print`, and `/help /clear /compact /model /auto /memory /cost /exit`.
 
 Deliberately deferred: MCP, external hook processes, subagents, teams, worktrees,
 cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, plan

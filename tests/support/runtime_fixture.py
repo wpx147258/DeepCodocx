@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from cli_agent.context.memory import MemoryStore
 from cli_agent.context.pipeline import ContextPipeline
 from cli_agent.context.prompts import PromptBuilder
 from cli_agent.context.skills import SkillLoader
@@ -92,6 +93,7 @@ def make_runtime(
     checkpoint: Any = None,
     thinking: ThinkingConfig | None = None,
     estimator: TokenEstimator | None = None,
+    memory: MemoryStore | None = None,
 ) -> tuple[AgentRuntime, SessionStore]:
     registry = ToolRegistry()
     for tool in tools or [EchoTool()]:
@@ -143,7 +145,7 @@ def make_runtime(
         estimator=estimator,
         initial_usage=Usage(),
         max_turns=max_turns,
-        memory=None,
+        memory=memory,
         thinking=thinking,
     )
     return AgentRuntime(deps), session

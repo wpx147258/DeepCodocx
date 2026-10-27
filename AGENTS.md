@@ -33,7 +33,9 @@
   a background failure surface as an agent turn error.
 - Memory is written only by the model through the `Remember` tool, with strict
   criteria (durable user preferences, not task state). Do not reintroduce background
-  extraction or per-turn summarization of the whole conversation.
+  extraction or per-turn summarization of the whole conversation. Records are
+  injected into the newest user message, never into the system prompt: a changing
+  system section invalidates the cached prefix.
 - Session records are append-only and must stay forward compatible: ignore unknown
   record types and unknown fields. A resumed session restores its recorded permission
   mode unless an explicit CLI flag overrides it.

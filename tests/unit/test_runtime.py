@@ -443,3 +443,87 @@ async def test_context_tokens_tracks_the_last_request(tmp_path: Path) -> None:
     await runtime.clear()
     assert runtime.context_tokens == 0
     await runtime.close()
+
+
+async def test_memory_rides_on_the_user_message_not_the_system_prompt(
+    tmp_path: Path,
+) -> None:
+    from cli_agent.context.memory import MemoryRecord, MemoryStore
+
+    store = MemoryStore(tmp_path / "memory")
+    store.save(MemoryRecord("prefers-tabs", "indent", "user", "Use tabs."))
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, memory=store)
+    await _consume(runtime, "tabs preference")
+
+    request = provider.requests[0]
+    system_text = "\n".join(section.text for section in request.system)
+    assert "Memory catalog" not in system_text
+    assert "call Remember" in system_text
+
+    last_user = [message for message in request.messages if message.role == "user"][-1]
+    assert "[Memory]" in last_user.text()
+    assert "Use tabs." in last_user.text()
+    # The stored transcript keeps the original message only.
+    assert "[Memory]" not in runtime.messages[0].text()
+    await runtime.close()
+
+
+async def test_memory_note_is_absent_without_records(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryStore
+
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(
+        provider, tmp_path=tmp_path, memory=MemoryStore(tmp_path / "memory")
+    )
+    await _consume(runtime, "hello")
+    last_user = [m for m in provider.requests[0].messages if m.role == "user"][-1]
+    assert "[Memory]" not in last_user.text()
+    await runtime.close()
+
+
+async def test_saving_memory_leaves_the_system_prompt_unchanged(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryStore
+    from cli_agent.tools.builtin.memory import RememberTool
+
+    store = MemoryStore(tmp_path / "memory")
+    provider = FakeProvider(
+        [
+            [
+                tool_response(
+                    [
+                        (
+                            "t1",
+                            "Remember",
+                            {
+                                "name": "prefers-tabs",
+                                "type": "user",
+                                "content": "Use tabs.",
+                            },
+                        )
+                    ]
+                )
+            ],
+            [text_response("saved")],
+            [text_response("onward")],
+        ]
+    )
+    runtime, _ = make_runtime(
+        provider,
+        tmp_path=tmp_path,
+        tools=[RememberTool(store)],
+        memory=store,
+    )
+    await _consume(runtime, "remember that I use tabs")
+    await _consume(runtime, "next question")
+
+    first = "\n".join(section.text for section in provider.requests[0].system)
+    third = "\n".join(section.text for section in provider.requests[2].system)
+    # The cached prefix must survive a memory write.
+    assert first == third
+    assert "prefers-tabs" not in first
+
+    last_user = [m for m in provider.requests[2].messages if m.role == "user"][-1]
+    assert "prefers-tabs" in last_user.text()
+    assert "Use tabs." in last_user.text()
+    await runtime.close()

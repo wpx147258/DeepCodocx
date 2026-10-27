@@ -12,7 +12,7 @@ import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 
-from .context.memory import MemoryStore
+from .context.memory import MemoryRecord, MemoryStore, inject_memory, memory_note
 from .context.pipeline import ContextPipeline
 from .context.prompts import PromptBuilder, PromptContext
 from .context.skills import SkillLoader
@@ -161,6 +161,16 @@ class AgentRuntime:
 
     def restore_permission(self, mode: str | None, auto_previous: str | None = None) -> None:
         self._permissions.restore(mode, auto_previous)
+
+    def memories(self) -> tuple[MemoryRecord, ...]:
+        if self._deps.memory is None:
+            return ()
+        return tuple(self._deps.memory.all())
+
+    def forget_memory(self, name: str) -> bool:
+        if self._deps.memory is None:
+            return False
+        return self._deps.memory.forget(name)
 
     async def run_turn(self, text: str | None = None) -> AsyncIterator[AgentEvent]:
         if text is not None:
@@ -325,8 +335,6 @@ class AgentRuntime:
             profile=self._deps.profile,
             tools=self._deps.registry.specs(),
             skills=self._deps.skills.catalog(),
-            memory_catalog=tuple(memory.catalog_lines()) if memory else (),
-            memories=tuple(memory.select(self._active_request)) if memory else (),
             project_instructions=self._deps.project_instructions,
             active_request=self._active_request,
             compaction_active=self._deps.context.checkpoint is not None,
@@ -336,10 +344,15 @@ class AgentRuntime:
     def _build_request(self, messages: Sequence[Message]) -> tuple[ModelRequest, int]:
         system = self._deps.prompt_builder.build(self._prompt_context())
         tools = self._deps.registry.specs()
+        # Memory rides on the newest user message so the system prompt (and the
+        # cacheable prefix) stays stable when a record is saved.
+        view = inject_memory(
+            messages, memory_note(self._deps.memory, self._active_request)
+        )
         request = ModelRequest(
             model=self._deps.profile.model,
             system=system,
-            messages=tuple(messages),
+            messages=view,
             tools=tools,
             max_output_tokens=self._deps.profile.max_output_tokens,
             profile=self._deps.profile,
@@ -347,7 +360,7 @@ class AgentRuntime:
         )
         # Tools and the system prompt consume real input tokens; leaving them out
         # made the calibration ratio drift toward the clamp.
-        estimated = self._deps.estimator.estimate_request(messages, system, tools)
+        estimated = self._deps.estimator.estimate_request(view, system, tools)
         return request, estimated
 
     def _finish_attempt(
