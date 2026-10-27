@@ -91,6 +91,7 @@ def make_runtime(
     max_turns: int = 50,
     checkpoint: Any = None,
     thinking: ThinkingConfig | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> tuple[AgentRuntime, SessionStore]:
     registry = ToolRegistry()
     for tool in tools or [EchoTool()]:
@@ -110,7 +111,7 @@ def make_runtime(
         archive=root / "archive",
     )
     session = SessionStore(paths, persist=False)
-    estimator = TokenEstimator()
+    estimator = estimator or TokenEstimator()
     pipeline = ContextPipeline(
         estimator=estimator,
         spill=SpillStore(root / "spills"),

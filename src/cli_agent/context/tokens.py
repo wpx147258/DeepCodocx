@@ -18,6 +18,7 @@ from ..messages import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
+    Usage,
 )
 from ..providers.base import SystemSection
 from ..tools.base import ToolSpec
@@ -50,6 +51,17 @@ def estimate_block(block: Any) -> int:
 
 def estimate_message(message: Message) -> int:
     return _MESSAGE_OVERHEAD + sum(estimate_block(block) for block in message.content)
+
+
+def prompt_tokens(usage: Usage) -> int:
+    """Prompt size as the provider counted it.
+
+    Anthropic-style APIs report the cached prefix separately from
+    ``input_tokens``; both are part of the prompt. Treating ``input_tokens``
+    alone as the prompt size undercounts by orders of magnitude once caching is
+    warm, which then corrupts calibration and any context readout.
+    """
+    return usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens
 
 
 class TokenEstimator:

@@ -37,5 +37,8 @@
 - The shell danger guard is approval UX, not a sandbox. Keep the pattern list short and
   high precision, never let `always`, bypass, or `/auto` skip it, and fail closed when
   there is no interactive asker.
+- Provider usage: `input_tokens` excludes the cached prefix. Prompt size is
+  input + cache_read + cache_write; calibrate the estimator and report context on that
+  sum, never on `input_tokens` alone.
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

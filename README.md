@@ -95,6 +95,11 @@ announced too (inline in the REPL, on stderr in print mode); if an attempt had a
 streamed text, the notice says that the earlier text is stale rather than silently
 splicing two partial answers together.
 
+`/cost` reports billed usage (uncached input, output, cache reads and writes) plus the
+estimated size of the last request against the context window. Provider `input_tokens`
+excludes the cached prefix, so prompt size is input + cache reads + cache writes; the
+token estimator and its calibration use that sum.
+
 Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
 `Glob` skips dependency and build directories unless the pattern or `path` names one.
 Consecutive read-only calls (`concurrency_safe`) in one turn run in parallel; writes and

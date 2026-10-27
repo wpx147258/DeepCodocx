@@ -16,7 +16,7 @@ from .context.memory import ExtractionRunner, MemoryStore
 from .context.pipeline import ContextPipeline
 from .context.prompts import PromptBuilder, PromptContext
 from .context.skills import SkillLoader
-from .context.tokens import TokenEstimator
+from .context.tokens import TokenEstimator, prompt_tokens
 from .errors import ConfigError, ProviderFailure
 from .events import (
     AgentContextEvent,
@@ -103,6 +103,7 @@ class AgentRuntime:
         self._deps = deps
         self._usage = deps.initial_usage
         self._active_request = ""
+        self._last_request_tokens = 0
         # Providers replaced by /model. They stay open until shutdown because a
         # summary or extraction call may still hold one.
         self._retired: list[Provider] = []
@@ -140,6 +141,15 @@ class AgentRuntime:
     @property
     def thinking(self) -> ThinkingConfig | None:
         return self._deps.thinking
+
+    @property
+    def context_tokens(self) -> int:
+        """Estimated size of the last request (messages + system + tools)."""
+        return self._last_request_tokens
+
+    @property
+    def context_window(self) -> int:
+        return self._deps.profile.context_window
 
     @property
     def permission_mode(self) -> str:
@@ -195,6 +205,7 @@ class AgentRuntime:
                 yield AgentContextEvent(context_event.kind, context_event.detail)
 
             request, estimated = self._build_request(prepared.messages)
+            self._last_request_tokens = estimated
 
             attempt = Attempt()
             try:
@@ -234,7 +245,7 @@ class AgentRuntime:
             self._usage = self._usage + attempt.usage
             self._deps.session.append_usage(attempt.usage, self._deps.profile.model)
             yield AgentUsage(attempt.usage, self._usage)
-            self._deps.estimator.calibrate(estimated, attempt.usage.input_tokens)
+            self._deps.estimator.calibrate(estimated, prompt_tokens(attempt.usage))
             recovery.retries = 0
 
             calls = attempt.assistant.tool_uses()
@@ -274,6 +285,7 @@ class AgentRuntime:
         self._deps.session.append_clear()
         self._deps.session.save_context(None)
         self._active_request = ""
+        self._last_request_tokens = 0
 
     async def switch_model(self, provider_name: str, model: str) -> None:
         if self._deps.provider_factory is None:

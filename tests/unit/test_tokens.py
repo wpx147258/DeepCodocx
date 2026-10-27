@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cli_agent.context.tokens import TokenEstimator
+from cli_agent.context.tokens import TokenEstimator, prompt_tokens
 from cli_agent.messages import user_message
 from cli_agent.providers.base import SystemSection
 from cli_agent.tools.base import ToolSpec
@@ -45,3 +45,16 @@ def test_calibration_ignores_empty_inputs() -> None:
     estimator.calibrate(0, 100)
     estimator.calibrate(100, 0)
     assert estimator.factor == 1.0
+
+
+def test_prompt_tokens_includes_cached_prefix() -> None:
+    from cli_agent.messages import Usage
+
+    usage = Usage(
+        input_tokens=331,
+        output_tokens=921,
+        cache_read_tokens=299_008,
+        cache_write_tokens=1_024,
+    )
+    # Prompt size is input + cached prefix; output tokens are not part of it.
+    assert prompt_tokens(usage) == 331 + 299_008 + 1_024

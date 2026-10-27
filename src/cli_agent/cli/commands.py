@@ -64,10 +64,14 @@ class CommandDispatcher:
             usage = runtime.usage
             renderer.notice(
                 "tokens: "
-                f"in {usage.input_tokens}, out {usage.output_tokens}, "
+                f"in {usage.input_tokens} (uncached), out {usage.output_tokens}, "
                 f"cache read {usage.cache_read_tokens}, "
                 f"cache write {usage.cache_write_tokens}"
             )
+            window = runtime.context_window
+            used = runtime.context_tokens
+            share = f"{used / window * 100:.1f}%" if window else "n/a"
+            renderer.notice(f"context: ~{used} / {window} tokens ({share})")
             return CommandResult(True)
 
         renderer.notice(f"Unknown command /{name}. Type /help.")

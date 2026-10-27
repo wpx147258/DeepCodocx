@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from cli_agent.context.tokens import TokenEstimator
 from cli_agent.events import (
     AgentError,
     AgentRetry,
@@ -14,6 +15,7 @@ from cli_agent.events import (
     AgentToolFinished,
     AgentTurnFinished,
 )
+from cli_agent.messages import Usage
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from cli_agent.providers.base import TextDelta
 from cli_agent.tools.base import ToolContext, ToolResult, ToolSpec
@@ -404,4 +406,40 @@ async def test_cancelling_parallel_tools_records_cancelled_results(tmp_path: Pat
     assert {result.tool_use_id for result in results} == {"t1", "t2"}
     assert all(result.is_error for result in results)
     assert "cancelled" in results[0].content[0].text.lower()
+    await runtime.close()
+
+
+async def test_calibration_counts_cached_prompt_tokens(tmp_path: Path) -> None:
+    estimator = TokenEstimator()
+    provider = FakeProvider(
+        [
+            [
+                text_response(
+                    "ok",
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=5,
+                        cache_read_tokens=10_000,
+                    ),
+                )
+            ]
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, estimator=estimator)
+    await _consume(runtime, "go")
+    # The prompt was ~10k tokens with most of it cached. Counting only the
+    # uncached input would drive the factor down toward the 0.5 clamp.
+    assert estimator.factor > 1.0
+    await runtime.close()
+
+
+async def test_context_tokens_tracks_the_last_request(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    assert runtime.context_tokens == 0
+    await _consume(runtime, "hello")
+    assert runtime.context_tokens > 0
+    assert runtime.context_window == 200_000
+    await runtime.clear()
+    assert runtime.context_tokens == 0
     await runtime.close()

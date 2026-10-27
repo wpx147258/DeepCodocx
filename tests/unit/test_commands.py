@@ -7,6 +7,7 @@ from rich.console import Console
 
 from cli_agent.cli.commands import CommandDispatcher
 from cli_agent.cli.render import Renderer
+from cli_agent.messages import Usage
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from tests.support.fake_provider import FakeProvider, text_response, tool_response
 from tests.support.runtime_fixture import ShellTool, make_runtime
@@ -89,4 +90,35 @@ async def test_help_lists_auto(tmp_path: Path) -> None:
     renderer, output = _renderer()
     await CommandDispatcher().dispatch("/help", runtime, renderer)
     assert "/auto" in output.getvalue()
+    await runtime.close()
+
+
+async def test_cost_shows_context_usage(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            [
+                text_response(
+                    "ok",
+                    usage=Usage(
+                        input_tokens=100,
+                        output_tokens=20,
+                        cache_read_tokens=900,
+                    ),
+                )
+            ]
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    renderer, output = _renderer()
+    dispatcher = CommandDispatcher()
+
+    async for _ in runtime.run_turn("hi"):
+        pass
+    await dispatcher.dispatch("/cost", runtime, renderer)
+
+    text = output.getvalue()
+    assert "uncached" in text
+    assert "cache read 900" in text
+    assert "context: ~" in text
+    assert "200000" in text
     await runtime.close()
