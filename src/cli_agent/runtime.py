@@ -441,15 +441,6 @@ class AgentRuntime:
         self, calls: Sequence[ToolUseBlock], parse_errors: dict[str, str]
     ) -> AsyncIterator[AgentToolFinished]:
         """Authorize every call in order, then execute in concurrency-safe batches."""
-        prepared = [
-            await self._deps.executor.prepare(
-                call,
-                policy=self._deps.policy,
-                asker=self._deps.asker,
-                parse_error=parse_errors.get(call.id),
-            )
-            for call in calls
-        ]
         results: list[ToolResultBlock] = []
         completed: set[str] = set()
         # The profile can change between calls (for example via /model), so
@@ -459,6 +450,17 @@ class AgentRuntime:
             supports_images=self._deps.profile.supports_images,
         )
         try:
+            # Authorization can wait on a user prompt; cancellation must close
+            # the tool_use/tool_result pair even before any tool starts.
+            prepared = [
+                await self._deps.executor.prepare(
+                    call,
+                    policy=self._deps.policy,
+                    asker=self._deps.asker,
+                    parse_error=parse_errors.get(call.id),
+                )
+                for call in calls
+            ]
             async for item, result in self._deps.executor.run_all(
                 prepared, ctx=tool_context
             ):

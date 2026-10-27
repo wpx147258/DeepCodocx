@@ -690,3 +690,37 @@ async def test_context_length_after_partial_is_not_retried(tmp_path: Path) -> No
     assert len(provider.requests) == 1
     assert any(isinstance(event, AgentError) for event in events)
     await runtime.close()
+
+
+async def test_cancel_during_permission_ask_closes_the_tool_pair(
+    tmp_path: Path,
+) -> None:
+    class HangingAsker:
+        async def ask(self, request):  # noqa: ANN001
+            await asyncio.Event().wait()
+
+    provider = FakeProvider(
+        [[tool_response([("t1", "Bash", {"command": "echo hi"})])]]
+    )
+    policy = PermissionPolicy(PermissionMode.DEFAULT, workspace=tmp_path)
+    runtime, _ = make_runtime(
+        provider,
+        tmp_path=tmp_path,
+        tools=[ShellTool()],
+        policy=policy,
+        asker=HangingAsker(),
+    )
+    task = asyncio.create_task(_consume(runtime, "go"))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("turn should have been cancelled")
+    result = runtime.messages[-1].tool_results()[0]
+    assert result.tool_use_id == "t1"
+    assert result.is_error
+    assert "cancelled" in result.content[0].text
+    await runtime.close()
