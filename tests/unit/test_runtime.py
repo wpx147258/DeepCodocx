@@ -3,8 +3,15 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from cli_agent.events import AgentError, AgentTextDelta, AgentToolFinished, AgentTurnFinished
+from cli_agent.events import (
+    AgentError,
+    AgentRetry,
+    AgentTextDelta,
+    AgentToolFinished,
+    AgentTurnFinished,
+)
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
+from cli_agent.providers.base import TextDelta
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
 
@@ -154,6 +161,60 @@ async def test_fatal_error_is_reported(tmp_path: Path) -> None:
     runtime, _ = make_runtime(provider, tmp_path=tmp_path)
     events = [event async for event in runtime.run_turn("go")]
     assert any(isinstance(event, AgentError) for event in events)
+    await runtime.close()
+
+
+async def test_refusal_is_not_reported_as_end_turn(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("I can't help with that.", stop_reason="refusal")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("do the thing")]
+    finished = events[-1]
+    assert isinstance(finished, AgentTurnFinished)
+    assert finished.stop_reason == "refusal"
+    await runtime.close()
+
+
+async def test_retryable_error_emits_a_retry_notice(tmp_path: Path, monkeypatch) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    provider = FakeProvider([[fail("rate limited", "retryable")], [text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    notices = [event for event in events if isinstance(event, AgentRetry)]
+    assert len(notices) == 1
+    assert notices[0].attempt == 1
+    assert notices[0].max_attempts == 3
+    assert notices[0].reason == "rate limited"
+    assert notices[0].partial is False
+    await runtime.close()
+
+
+async def test_retry_after_partial_output_is_marked_partial(
+    tmp_path: Path, monkeypatch
+) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    provider = FakeProvider(
+        [
+            [TextDelta("half an answer "), fail("rate limited", "retryable")],
+            [text_response("the whole answer")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    notices = [event for event in events if isinstance(event, AgentRetry)]
+    assert len(notices) == 1
+    assert notices[0].partial is True
+    # The notice is emitted before the successful attempt streams.
+    retry_index = events.index(notices[0])
+    assert any(
+        isinstance(event, AgentTextDelta) and event.text == "the whole answer"
+        for event in events[retry_index:]
+    )
     await runtime.close()
 
 

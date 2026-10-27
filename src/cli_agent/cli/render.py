@@ -15,6 +15,7 @@ from ..events import (
     AgentError,
     AgentEvent,
     AgentNotice,
+    AgentRetry,
     AgentTextDelta,
     AgentToolFinished,
     AgentToolStarted,
@@ -22,6 +23,9 @@ from ..events import (
     AgentUsage,
 )
 from ..messages import Usage
+
+# Stop reasons that mean the turn did not produce a trustworthy answer.
+_FAILED_STOP_REASONS = frozenset({"refusal", "error", "max_turns"})
 
 
 class Renderer:
@@ -75,6 +79,14 @@ class Renderer:
                 self.console.print(f"[red]  error:[/red] {escape(text)}")
             else:
                 self.console.print(f"[dim]  {escape(text)}[/dim]")
+        elif isinstance(event, AgentRetry):
+            self._break_line()
+            note = f"retrying {event.attempt}/{event.max_attempts}"
+            if event.partial:
+                note += " — the text above belongs to the abandoned attempt"
+            self.console.print(
+                f"[yellow]{note}[/yellow] [dim]{escape(event.reason)}[/dim]"
+            )
         elif isinstance(event, AgentUsage):
             self.last_usage = event.total
         elif isinstance(event, AgentContextEvent):
@@ -91,9 +103,10 @@ class Renderer:
             )
         elif isinstance(event, AgentTurnFinished):
             self._break_line()
+            stop = "" if event.stop_reason == "end_turn" else f" · stopped: {event.stop_reason}"
             self.console.print(
                 f"[dim]tokens: in {event.total.input_tokens} / "
-                f"out {event.total.output_tokens}[/dim]"
+                f"out {event.total.output_tokens}{escape(stop)}[/dim]"
             )
 
     def notice(self, text: str) -> None:
@@ -145,6 +158,13 @@ class PrintRenderer:
             sys.stdout.write(event.text)
             sys.stdout.flush()
             self._streamed = True
+        elif isinstance(event, AgentRetry):
+            self._close_reasoning()
+            note = f"\n[retrying {event.attempt}/{event.max_attempts}: {event.reason}]"
+            if event.partial:
+                note += " (earlier partial output is stale)"
+            sys.stderr.write(note + "\n")
+            sys.stderr.flush()
         elif isinstance(event, (AgentToolStarted, AgentToolFinished)):
             self._close_reasoning()
         elif isinstance(event, AgentError):
@@ -156,6 +176,9 @@ class PrintRenderer:
             if self._streamed:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
+            if event.stop_reason in _FAILED_STOP_REASONS:
+                self.failed = True
+                print(f"stopped: {event.stop_reason}", file=sys.stderr)
 
     def _close_reasoning(self) -> None:
         if self._reasoning_open:

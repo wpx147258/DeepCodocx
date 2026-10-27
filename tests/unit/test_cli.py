@@ -92,6 +92,28 @@ def test_print_mode_error_exit_code(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 2
 
 
+def test_print_mode_refusal_exit_code(tmp_path: Path, monkeypatch) -> None:
+    class FakeRuntime:
+        async def run_turn(self, text: str):
+            yield AgentTextDelta("I can't help with that.")
+            yield AgentTurnFinished("refusal", Usage())
+
+        async def close(self) -> None:
+            return None
+
+    bundle = SimpleNamespace(
+        runtime=FakeRuntime(),
+        profile=SimpleNamespace(model="m", provider_name="p"),
+        session_id="s",
+        degraded=False,
+    )
+    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    result = CliRunner().invoke(main, ["-p", "hi"], env=_env(tmp_path))
+    assert result.exit_code == 2
+    combined = result.output + (getattr(result, "stderr", "") or "")
+    assert "refusal" in combined
+
+
 def test_thinking_flags_reach_build_options(tmp_path: Path, monkeypatch) -> None:
     class FakeRuntime:
         async def run_turn(self, text: str):

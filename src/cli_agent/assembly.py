@@ -216,16 +216,23 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     estimator = TokenEstimator()
     spill = SpillStore(store.spills_dir)
 
+    # Background work follows the active provider so /model does not leave the
+    # summarizer and memory extractor on a stale (or later closed) client.
+    active: dict[str, Provider] = {"provider": provider}
+    active_profile: dict[str, ModelProfile] = {"profile": profile}
+
     async def complete(prompt: str, max_tokens: int) -> str:
+        current = active["provider"]
+        current_profile = active_profile["profile"]
         request = ModelRequest(
-            model=profile.model,
+            model=current_profile.model,
             system=(SystemSection("summarizer", _SUMMARIZER_SYSTEM),),
             messages=(user_message(prompt),),
             tools=(),
             max_output_tokens=max_tokens,
-            profile=profile,
+            profile=current_profile,
         )
-        return await _complete_request(provider, request)
+        return await _complete_request(current, request)
 
     async def summarize(text: str, max_tokens: int) -> str:
         prompt = _COMPACT_PROMPT + "\n\nConversation:\n" + text
@@ -269,6 +276,10 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         thinking = ThinkingConfig(config.thinking_budget) if enabled else None
         return provider, profile, thinking
 
+    def on_model_switch(new_provider: Provider, new_profile: ModelProfile) -> None:
+        active["provider"] = new_provider
+        active_profile["profile"] = new_profile
+
     deps = RuntimeDeps(
         provider=provider,
         profile=profile,
@@ -292,6 +303,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         extractor=extractor,
         provider_factory=provider_factory,
         thinking=thinking,
+        on_model_switch=on_model_switch,
     )
     runtime = AgentRuntime(deps)
     return RuntimeBundle(

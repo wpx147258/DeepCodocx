@@ -23,6 +23,7 @@ from .events import (
     AgentError,
     AgentEvent,
     AgentNotice,
+    AgentRetry,
     AgentTextDelta,
     AgentToolFinished,
     AgentToolStarted,
@@ -90,6 +91,9 @@ class RuntimeDeps:
     extractor: MemoryExtractor | None = None
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
+    # Lets the host re-point background helpers (summarization, memory
+    # extraction) at the provider that is actually active after a model switch.
+    on_model_switch: Callable[[Provider, ModelProfile], None] | None = None
 
 
 @dataclass
@@ -106,6 +110,9 @@ class AgentRuntime:
         self._usage = deps.initial_usage
         self._active_request = ""
         self._extraction_task: asyncio.Task[None] | None = None
+        # Providers replaced by /model. They stay open until shutdown because a
+        # summary or extraction call may still hold one.
+        self._retired: list[Provider] = []
 
     # ------------------------------------------------------------------
     # public surface
@@ -172,16 +179,22 @@ class AgentRuntime:
             for event in prepared.events:
                 yield AgentContextEvent(event.kind, event.detail)
 
+            system = self._deps.prompt_builder.build(self._prompt_context())
+            tools = self._deps.registry.specs()
             request = ModelRequest(
                 model=self._deps.profile.model,
-                system=self._deps.prompt_builder.build(self._prompt_context()),
+                system=system,
                 messages=prepared.messages,
-                tools=self._deps.registry.specs(),
+                tools=tools,
                 max_output_tokens=self._deps.profile.max_output_tokens,
                 profile=self._deps.profile,
                 thinking=self._deps.thinking,
             )
-            estimated = self._deps.estimator.estimate_messages(prepared.messages)
+            # Tools and the system prompt consume real input tokens; leaving them
+            # out made the calibration ratio drift toward the clamp.
+            estimated = self._deps.estimator.estimate_request(
+                prepared.messages, system, tools
+            )
 
             assistant: Message | None = None
             stop_reason: StopReason = "end_turn"
@@ -223,8 +236,16 @@ class AgentRuntime:
                         )
                         yield AgentUsage(provider_event.usage, self._usage)
             except ProviderFailure as failure:
-                action = await self._recover(failure, recovery)
+                action, delay = await self._recover(failure, recovery)
                 if action == "retry":
+                    yield AgentRetry(
+                        attempt=recovery.retries,
+                        max_attempts=MAX_RETRIES,
+                        kind=failure.kind,
+                        reason=failure.message,
+                        partial=emitted_text,
+                    )
+                    await asyncio.sleep(delay)
                     turns -= 1
                     continue
                 if action == "reactive":
@@ -250,8 +271,11 @@ class AgentRuntime:
                     self._append(user_message(CONTINUE_PROMPT))
                     yield AgentContextEvent("continue", "max output tokens; asking for continuation")
                     continue
-                await self._after_turn("end_turn")
-                yield AgentTurnFinished("end_turn", self._usage)
+                # Report what actually happened: a refusal or a truncated turn is
+                # not a successful end_turn, and hosts exit non-zero for it.
+                final_reason: StopReason = "error" if stop_reason == "tool_use" else stop_reason
+                await self._after_turn(final_reason)
+                yield AgentTurnFinished(final_reason, self._usage)
                 return
 
             results: list[ToolResultBlock] = []
@@ -321,10 +345,13 @@ class AgentRuntime:
         self._deps.provider = provider
         self._deps.profile = profile
         self._deps.thinking = thinking
-        try:
-            await old.aclose()
-        except Exception:  # noqa: BLE001
-            logger.debug("closing previous provider failed", exc_info=True)
+        if self._deps.on_model_switch is not None:
+            self._deps.on_model_switch(provider, profile)
+        if old is not provider:
+            # Background helpers may still be mid-call on the old provider, and
+            # summarization would otherwise keep using a closed client. Close it
+            # at shutdown instead.
+            self._retired.append(old)
         self._deps.session.append_model(profile.provider_name, profile.model)
 
     async def close(self) -> None:
@@ -338,9 +365,13 @@ class AgentRuntime:
                     task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+        retired, self._retired = self._retired, []
         try:
             await self._deps.provider.aclose()
         finally:
+            for provider in retired:
+                with contextlib.suppress(Exception):
+                    await provider.aclose()
             self._deps.session.close()
 
     # ------------------------------------------------------------------
@@ -365,7 +396,12 @@ class AgentRuntime:
             compaction_active=self._deps.context.checkpoint is not None,
         )
 
-    async def _recover(self, failure: ProviderFailure, recovery: _Recovery) -> str:
+    async def _recover(self, failure: ProviderFailure, recovery: _Recovery) -> tuple[str, float]:
+        """Decide what to do with a failed attempt, and how long to wait.
+
+        The caller emits the retry notice and sleeps, so the delay is part of the
+        decision rather than a side effect here.
+        """
         if failure.kind == "retryable" and recovery.retries < MAX_RETRIES:
             delay = 0.5 * (2**recovery.retries)
             recovery.retries += 1
@@ -375,13 +411,12 @@ class AgentRuntime:
                 recovery.retries,
                 MAX_RETRIES,
             )
-            await asyncio.sleep(delay)
-            return "retry"
+            return "retry", delay
         if failure.kind == "context_length" and not recovery.attempted_reactive:
             recovery.attempted_reactive = True
             recovery.reactive_requested = True
-            return "reactive"
-        return "fail"
+            return "reactive", 0.0
+        return "fail", 0.0
 
     async def _after_turn(self, stop_reason: str) -> None:
         if stop_reason != "end_turn":

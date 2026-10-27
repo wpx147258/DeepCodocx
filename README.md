@@ -89,7 +89,14 @@ so `cli-agent --provider deepseek` requests thinking without extra flags.
 the model think. Use a reasoning-capable model; for DeepSeek, `deepseek-flash`
 (not `deepseek-chat`) produces reasoning.
 
+`-p` exits `0` only when the turn ends normally. A refusal, provider error, or
+`--max-turns` cutoff exits `2`, and the stop reason is written to stderr. Retries are
+announced too (inline in the REPL, on stderr in print mode); if an attempt had already
+streamed text, the notice says that the earlier text is stale rather than silently
+splicing two partial answers together.
+
 Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
+`Glob` skips dependency and build directories unless the pattern or `path` names one.
 
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from

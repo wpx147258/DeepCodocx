@@ -18,6 +18,8 @@ from ..messages import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from ..providers.base import SystemSection
+from ..tools.base import ToolSpec
 
 _IMAGE_TOKENS = 1_600
 _MESSAGE_OVERHEAD = 4
@@ -58,6 +60,24 @@ class TokenEstimator:
 
     def estimate_messages(self, messages: tuple[Message, ...] | list[Message]) -> int:
         return max(0, int(sum(estimate_message(message) for message in messages) * self.factor))
+
+    def estimate_request(
+        self,
+        messages: tuple[Message, ...] | list[Message],
+        system: tuple[SystemSection, ...] = (),
+        tools: tuple[ToolSpec, ...] = (),
+    ) -> int:
+        """Estimate everything the provider counts as input.
+
+        System sections and tool schemas are sent on every request, so leaving
+        them out makes ``calibrate`` blame the transcript for a constant overhead.
+        """
+        raw = sum(estimate_message(message) for message in messages)
+        raw += sum(estimate_text(section.text) for section in system)
+        for tool in tools:
+            raw += estimate_text(tool.name) + estimate_text(tool.description)
+            raw += estimate_text(json.dumps(dict(tool.input_schema), ensure_ascii=False))
+        return max(0, int(raw * self.factor))
 
     def calibrate(self, estimated: int, actual: int) -> None:
         """Blend the current factor toward the provider's observed token count."""

@@ -79,6 +79,39 @@ async def test_read_missing_file_is_an_error(tmp_path: Path) -> None:
     assert "does not exist" in result.text_content()
 
 
+async def test_read_offset_past_end_is_reported(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    (tmp_path / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+    result = await ReadTool().run({"path": "a.txt", "offset": 99}, ctx)
+    assert result.is_error
+    assert "past the end" in result.text_content()
+    assert "2 lines" in result.text_content()
+
+
+async def test_read_empty_file_still_reports_empty(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+    result = await ReadTool().run({"path": "empty.txt"}, ctx)
+    assert not result.is_error
+    assert result.text_content().strip() == "(empty file)"
+
+
+async def test_glob_skips_dependency_directories(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    (tmp_path / ".venv" / "lib").mkdir(parents=True)
+    (tmp_path / ".venv" / "lib" / "vendored.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("y = 1\n", encoding="utf-8")
+
+    found = await GlobTool().run({"pattern": "**/*.py"}, ctx)
+    assert "app.py" in found.text_content()
+    assert "vendored.py" not in found.text_content()
+
+    # Naming the directory explicitly still searches it.
+    targeted = await GlobTool().run({"pattern": "**/*.py", "path": ".venv"}, ctx)
+    assert "vendored.py" in targeted.text_content()
+
+
 async def test_bash_reports_exit_code_marker(tmp_path: Path) -> None:
     result = await BashTool().run({"command": "exit 7"}, _ctx(tmp_path))
     assert "[exit code: 7]" in result.text_content()
