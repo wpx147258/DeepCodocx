@@ -123,6 +123,17 @@ async def test_cost_shows_context_usage(tmp_path: Path) -> None:
     assert "out 20" in text
     assert "context: ~" in text
     assert "200000" in text
+    assert "cache: last 90.0% hit" in text
+    assert "session 90.0% hit" in text
+    await runtime.close()
+
+
+async def test_compact_warns_about_the_prefix_rewrite(tmp_path: Path) -> None:
+    runtime, _ = make_runtime(FakeProvider([]), tmp_path=tmp_path)
+    renderer, output = _renderer()
+
+    await CommandDispatcher().dispatch("/compact", runtime, renderer)
+    assert "rewrites the prompt prefix" in output.getvalue()
     await runtime.close()
 
 

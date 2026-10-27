@@ -103,6 +103,7 @@ class AgentRuntime:
         self._usage = deps.initial_usage
         self._active_request = ""
         self._last_request_tokens = 0
+        self._last_usage = Usage()
         # Providers replaced by /model. They stay open until shutdown because a
         # background summary call may still hold one.
         self._retired: list[Provider] = []
@@ -145,6 +146,11 @@ class AgentRuntime:
     @property
     def context_window(self) -> int:
         return self._deps.profile.context_window
+
+    @property
+    def last_usage(self) -> Usage:
+        """Usage reported for the most recent provider request."""
+        return self._last_usage
 
     @property
     def permission_mode(self) -> str:
@@ -244,6 +250,7 @@ class AgentRuntime:
                 return
 
             self._append(attempt.assistant)
+            self._last_usage = attempt.usage
             self._usage = self._usage + attempt.usage
             self._deps.session.append_usage(attempt.usage, self._deps.profile.model)
             yield AgentUsage(attempt.usage, self._usage)
@@ -287,6 +294,7 @@ class AgentRuntime:
         self._deps.session.save_context(None)
         self._active_request = ""
         self._last_request_tokens = 0
+        self._last_usage = Usage()
 
     async def switch_model(self, provider_name: str, model: str) -> None:
         if self._deps.provider_factory is None:

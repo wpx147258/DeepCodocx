@@ -94,10 +94,12 @@ announced too (inline in the REPL, on stderr in print mode); if an attempt had a
 streamed text, the notice says that the earlier text is stale rather than silently
 splicing two partial answers together.
 
-`/cost` reports billed usage (uncached input, output, cache reads and writes) plus the
-estimated size of the last request against the context window. Provider `input_tokens`
-excludes the cached prefix, so prompt size is input + cache reads + cache writes; the
-token estimator and its calibration use that sum.
+`/cost` reports billed usage (uncached input, output, cache reads and writes), the
+estimated size of the last request against the context window, and the prefix cache
+hit rate for that request and for the session. Provider `input_tokens` excludes the
+cached prefix, so prompt size is input + cache reads + cache writes; the token
+estimator and its calibration use that sum. `/compact` warns before rewriting the
+prompt prefix, because the next request has to re-read the context.
 
 Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`, and
 `Remember` when memory is enabled.

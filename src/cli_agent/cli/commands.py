@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ..context.tokens import prompt_tokens
 from ..errors import CliAgentError
 from ..events import AgentNotice
+from ..messages import Usage
 from ..runtime import AgentRuntime
 from .render import Renderer
 
@@ -54,6 +55,10 @@ class CommandDispatcher:
             renderer.notice("Conversation cleared.")
             return CommandResult(True)
         if name == "compact":
+            renderer.notice(
+                "Compacting rewrites the prompt prefix; the next request re-reads "
+                "the context once."
+            )
             async for event in runtime.compact():
                 renderer.render(event)
             return CommandResult(True)
@@ -80,6 +85,11 @@ class CommandDispatcher:
             used = runtime.context_tokens
             share = f"{used / window * 100:.1f}%" if window else "n/a"
             renderer.notice(f"context: ~{used} / {window} tokens ({share})")
+            renderer.notice(
+                "cache: "
+                f"last {_cache_hit(runtime.last_usage)}, "
+                f"session {_cache_hit(usage)}"
+            )
             return CommandResult(True)
 
         renderer.notice(f"Unknown command /{name}. Type /help.")
@@ -159,6 +169,13 @@ class CommandDispatcher:
                 renderer.notice(f"No memory named {rest!r}.")
             return
         renderer.error("usage: /memory [list|forget <name>]")
+
+
+def _cache_hit(usage: Usage) -> str:
+    prompt = prompt_tokens(usage)
+    if prompt <= 0:
+        return "n/a"
+    return f"{usage.cache_read_tokens / prompt * 100:.1f}% hit"
 
 
 __all__ = ["CommandDispatcher", "CommandResult", "AgentNotice"]

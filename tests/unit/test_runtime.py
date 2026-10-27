@@ -527,3 +527,60 @@ async def test_saving_memory_leaves_the_system_prompt_unchanged(tmp_path: Path) 
     assert "prefers-tabs" in last_user.text()
     assert "Use tabs." in last_user.text()
     await runtime.close()
+
+
+def _request_signature(messages):
+    import json
+
+    from cli_agent.messages import TextBlock, ToolResultBlock, ToolUseBlock
+
+    signature = []
+    for message in messages:
+        blocks = []
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                blocks.append(("text", block.text))
+            elif isinstance(block, ToolUseBlock):
+                blocks.append(
+                    (
+                        "tool",
+                        block.id,
+                        block.name,
+                        json.dumps(dict(block.input), sort_keys=True),
+                    )
+                )
+            elif isinstance(block, ToolResultBlock):
+                blocks.append(
+                    (
+                        "result",
+                        block.tool_use_id,
+                        tuple(item.text for item in block.content),
+                    )
+                )
+        signature.append((message.role, tuple(blocks)))
+    return signature
+
+
+async def test_requests_append_without_rewriting_the_prefix(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            [text_response("first answer")],
+            [tool_response([("t1", "Echo", {"text": "hi"})])],
+            [text_response("done")],
+            [text_response("third answer")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    await _consume(runtime, "one")
+    await _consume(runtime, "two")
+    await _consume(runtime, "three")
+
+    systems = ["\n\n".join(section.text for section in r.system) for r in provider.requests]
+    assert len(set(systems)) == 1
+
+    signatures = [_request_signature(r.messages) for r in provider.requests]
+    for earlier, later in zip(signatures, signatures[1:], strict=False):
+        # Every request must extend the previous one byte for byte; a rewrite
+        # here would invalidate the provider's cached prefix.
+        assert later[: len(earlier)] == earlier
+    await runtime.close()
