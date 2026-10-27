@@ -214,14 +214,14 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         rules=rules,
         workspace=config.paths.cwd,
     )
-    executor = ToolExecutor(registry)
+    spill = SpillStore(store.spills_dir)
+    executor = ToolExecutor(registry, spill=spill)
     tool_context = ToolContext(
         cwd=config.paths.cwd,
         session_id=store.session_id,
         data_dir=config.paths.project_dir,
     )
     estimator = TokenEstimator()
-    spill = SpillStore(store.spills_dir)
 
     # Background work follows the active provider so /model does not leave the
     # summarizer and memory extractor on a stale (or later closed) client.
@@ -247,7 +247,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
 
     pipeline = ContextPipeline(
         estimator=estimator,
-        spill=spill,
         session_paths=store.paths,
         summarize=summarize,
         checkpoint=checkpoint,

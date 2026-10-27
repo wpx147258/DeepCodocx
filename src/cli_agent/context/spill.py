@@ -8,7 +8,15 @@ import re
 import tempfile
 from pathlib import Path
 
+_POINTER_PREFIX = "[tool output spilled: "
 _SAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
+# Spill once, when the result is produced: rewriting old results later would
+# invalidate the provider's cached prefix.
+SPILL_THRESHOLD_CHARS = 32_000
+
+
+def should_spill(text: str) -> bool:
+    return len(text) > SPILL_THRESHOLD_CHARS and not text.startswith(_POINTER_PREFIX)
 
 
 class SpillStore:
@@ -30,7 +38,7 @@ class SpillStore:
         head = text[: preview_chars * 2 // 3]
         tail = text[-preview_chars // 3 :] if len(text) > preview_chars else ""
         parts = [
-            f"[tool output spilled: {path}",
+            f"{_POINTER_PREFIX}{path}",
             f" bytes={len(text.encode('utf-8'))}",
             " preview:",
             head,

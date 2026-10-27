@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from ..messages import ToolUseBlock
+from ..context.spill import SpillStore, should_spill
+from ..messages import ImageBlock, TextBlock, ToolUseBlock
 from ..permissions.policy import Asker, PermissionPolicy
 from .base import Tool, ToolContext, ToolResult
 from .registry import ToolRegistry
@@ -35,8 +36,9 @@ class PreparedCall:
 
 
 class ToolExecutor:
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(self, registry: ToolRegistry, *, spill: SpillStore | None = None) -> None:
         self.registry = registry
+        self.spill = spill
 
     async def prepare(
         self,
@@ -98,7 +100,28 @@ class ToolExecutor:
             return ToolResult.error(
                 f"Error: tool {prepared.call.name!r} returned an invalid result"
             )
-        return result
+        return self._spill_large(prepared.call.id, result)
+
+    def _spill_large(self, tool_use_id: str, result: ToolResult) -> ToolResult:
+        """Persist oversized output and return a pointer, once, at creation.
+
+        The pointer is what gets stored in the transcript, so later requests send
+        exactly the same bytes and the provider's prefix cache stays valid.
+        """
+        if self.spill is None:
+            return result
+        blocks: list[TextBlock | ImageBlock] = []
+        changed = False
+        for block in result.content:
+            if isinstance(block, TextBlock) and should_spill(block.text):
+                path = self.spill.spill(tool_use_id, block.text)
+                blocks.append(TextBlock(self.spill.pointer(block.text, path)))
+                changed = True
+            else:
+                blocks.append(block)
+        if not changed:
+            return result
+        return replace(result, content=tuple(blocks))
 
     async def execute(
         self,

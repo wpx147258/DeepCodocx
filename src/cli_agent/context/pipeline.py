@@ -1,8 +1,10 @@
-"""Ordered context pipeline: repair -> spill -> prune -> snip -> summarize.
+"""Context pipeline: repair -> summarize.
 
-Deterministic stages operate on a view and can be recomputed. Only the summary
-stage calls a model; its result is stored as a checkpoint so a resumed session
-does not pay for the same summary twice.
+History is append-only on purpose. Rewriting old messages invalidates the
+provider's cached prefix, which costs a full re-read of the conversation; large
+tool output is spilled once, when it is produced, and stored in the transcript
+that way. The only stage that rewrites history is summarization, at 85% of the
+token budget, and its checkpoint keeps the new prefix stable afterwards.
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,28 +30,15 @@ from ..messages import (
 from ..providers.base import ModelProfile
 from ..session.paths import SessionPaths
 from ..transcript import Transcript
-from .spill import SpillStore
-from .tokens import TokenEstimator, estimate_block, estimate_message
+from .tokens import TokenEstimator, estimate_message
 
 logger = logging.getLogger(__name__)
 
-SPILL_THRESHOLD_TOKENS = 8_000
-LATEST_BATCH_FRACTION = 0.25
-PRUNE_TRIGGER = 0.60
-PRUNE_TARGET = 0.50
-KEEP_RECENT_RESULTS = 3
-# Replacing a small result with a spill pointer made of a preview can grow
-# the request; only prune results that are clearly larger than the pointer.
-PRUNE_MIN_TOKENS = 600
-PRUNE_PREVIEW_TOKENS = 200
-SNIP_TRIGGER = 0.75
-SNIP_TARGET = 0.55
 SUMMARY_TRIGGER = 0.85
 SUMMARY_TARGET = 0.30
 SUMMARY_MAX_TOKENS = 2_000
 REACTIVE_KEEP_MESSAGES = 5
 MIN_TAIL_MESSAGES = 4
-_SPILL_PREFIX = "[tool output spilled:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,13 +94,11 @@ class ContextPipeline:
         self,
         *,
         estimator: TokenEstimator,
-        spill: SpillStore,
         session_paths: SessionPaths,
         summarize: Callable[[str, int], Awaitable[str]],
         checkpoint: ContextCheckpoint | None = None,
     ) -> None:
         self.estimator = estimator
-        self.spill = spill
         self.session_paths = session_paths
         self._summarize_fn = summarize
         self._checkpoint = checkpoint
@@ -144,10 +131,6 @@ class ContextPipeline:
                 view = applied
 
         budget = max(1_000, profile.context_window - profile.max_output_tokens - 4_096)
-
-        view = self._spill_latest_batch(view, budget, events)
-        view = self._prune_old_results(view, budget, events)
-        view = self._snip(view, budget, active_request, events)
 
         size = self.estimator.estimate_messages(view)
         if force_compact or size > budget * SUMMARY_TRIGGER:
@@ -205,120 +188,7 @@ class ContextPipeline:
         return [summary_message, *tail]
 
     # ------------------------------------------------------------------
-    # stage 1: spill the latest tool-result batch
-    # ------------------------------------------------------------------
-
-    def _spill_latest_batch(
-        self, view: list[Message], budget: int, events: list[ContextEvent]
-    ) -> list[Message]:
-        indices = _tool_result_indices(view)
-        if not indices:
-            return view
-        index = indices[-1]
-        message = view[index]
-        blocks = list(message.content)
-        batch_tokens = sum(
-            estimate_block(block) for block in blocks if isinstance(block, ToolResultBlock)
-        )
-        force = batch_tokens > budget * LATEST_BATCH_FRACTION
-        changed = 0
-        for position, block in enumerate(blocks):
-            if not isinstance(block, ToolResultBlock):
-                continue
-            if not force and estimate_block(block) <= SPILL_THRESHOLD_TOKENS:
-                continue
-            replacement = self._spill_block(block)
-            if replacement is not block:
-                blocks[position] = replacement
-                changed += 1
-        if changed:
-            view[index] = replace(message, content=tuple(blocks))
-            events.append(ContextEvent("spill", f"{changed} tool result(s) spilled"))
-        return view
-
-    # ------------------------------------------------------------------
-    # stage 2: prune older consumed results
-    # ------------------------------------------------------------------
-
-    def _prune_old_results(
-        self, view: list[Message], budget: int, events: list[ContextEvent]
-    ) -> list[Message]:
-        if self.estimator.estimate_messages(view) <= budget * PRUNE_TRIGGER:
-            return view
-        indices = _tool_result_indices(view)
-        candidates = indices[:-KEEP_RECENT_RESULTS] if len(indices) > KEEP_RECENT_RESULTS else []
-        changed = 0
-        for index in candidates:
-            message = view[index]
-            blocks = list(message.content)
-            replaced_here = 0
-            for position, block in enumerate(blocks):
-                if not isinstance(block, ToolResultBlock):
-                    continue
-                if estimate_block(block) <= PRUNE_MIN_TOKENS:
-                    continue
-                replacement = self._spill_block(
-                    block, preview_tokens=PRUNE_PREVIEW_TOKENS
-                )
-                if replacement is not block:
-                    blocks[position] = replacement
-                    replaced_here += 1
-            if replaced_here:
-                view[index] = replace(message, content=tuple(blocks))
-                changed += replaced_here
-            if self.estimator.estimate_messages(view) <= budget * PRUNE_TARGET:
-                break
-        if changed:
-            events.append(ContextEvent("prune", f"{changed} older tool result(s) spilled"))
-        return view
-
-    def _spill_block(
-        self, block: ToolResultBlock, *, preview_tokens: int = 1_500
-    ) -> ToolResultBlock:
-        text = _result_text(block)
-        if not text or text.startswith(_SPILL_PREFIX):
-            return block
-        path = self.spill.spill(block.tool_use_id, text)
-        pointer = self.spill.pointer(text, path, preview_tokens=preview_tokens)
-        return ToolResultBlock(
-            tool_use_id=block.tool_use_id,
-            content=(TextBlock(pointer),),
-            is_error=block.is_error,
-        )
-
-    # ------------------------------------------------------------------
-    # stage 3: archive and snip
-    # ------------------------------------------------------------------
-
-    def _snip(
-        self,
-        view: list[Message],
-        budget: int,
-        active_request: str,
-        events: list[ContextEvent],
-    ) -> list[Message]:
-        if self.estimator.estimate_messages(view) <= budget * SNIP_TRIGGER:
-            return view
-        start = self._choose_tail_start(view, int(budget * SNIP_TARGET))
-        if start <= 1:
-            return view
-        archive_path = self._archive(view)
-        first = view[0]
-        marker = TextBlock(
-            "[Earlier conversation archived at "
-            f"{archive_path}. Use Read to inspect it if a detail matters.]"
-        )
-        first = replace(first, content=(*first.content, marker))
-        tail = view[start:]
-        if tail and tail[0].role == "user":
-            first = replace(first, content=(*first.content, *tail[0].content))
-            tail = tail[1:]
-        events.append(ContextEvent("archive", archive_path))
-        events.append(ContextEvent("snip", f"kept {len(tail) + 1} of {len(view)} messages"))
-        return [first, *tail]
-
-    # ------------------------------------------------------------------
-    # stage 4/5: summary
+    # stage: summary
     # ------------------------------------------------------------------
 
     async def _summarize_view(
@@ -412,6 +282,12 @@ class ContextPipeline:
         return str(path)
 
 
+def _result_text(block: ToolResultBlock) -> str:
+    return "\n".join(
+        item.text for item in block.content if isinstance(item, TextBlock)
+    )
+
+
 def _summary_message(checkpoint: ContextCheckpoint) -> Message:
     text = (
         "[Compacted context]\n\n"
@@ -428,20 +304,6 @@ def _summary_message(checkpoint: ContextCheckpoint) -> Message:
         role="user",
         content=(TextBlock(text),),
         created_at=now_iso(),
-    )
-
-
-def _tool_result_indices(view: list[Message]) -> list[int]:
-    return [
-        index
-        for index, message in enumerate(view)
-        if message.role == "user" and message.tool_results()
-    ]
-
-
-def _result_text(block: ToolResultBlock) -> str:
-    return "".join(
-        item.text for item in block.content if isinstance(item, TextBlock)
     )
 
 

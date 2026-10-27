@@ -11,7 +11,7 @@ compatible endpoints such as DeepSeek, Kimi, MiniMax, and GLM.
 
 ```
 user input
-  -> context pipeline (repair, spill, prune, snip, summarize)
+  -> context pipeline (repair, summarize when the budget is full)
   -> provider.stream()
   -> text deltas / tool calls
   -> tool executor (validate -> permission -> run)
@@ -51,7 +51,7 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key_env = ["DEEPSEEK_API_KEY"]
 default_model = "deepseek-flash[1M]"
 context_window = 880000
-max_output_tokens = 256000
+max_output_tokens = 128000
 supports_thinking = true
 thinking_by_default = true
 
@@ -155,9 +155,12 @@ Implemented today:
 - permission modes, allow/deny rules, workspace boundary, interactive and
   fail-closed non-interactive asks, and `/auto` for full-permission mode;
 - append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
-- ordered context compaction (spill, prune, snip, summarize) and reactive compaction;
-  pruning only replaces tool results that are clearly larger than the disk-pointer
-  preview, so the request actually shrinks;
+- append-only history: earlier messages are never rewritten to save tokens, so the
+  provider's prefix cache stays valid. Oversized tool output is spilled once, when it
+  is produced, and the transcript stores the pointer;
+- summarization at 85% of the token budget (plus reactive compaction after a
+  context-length error) is the only stage that rewrites history; the checkpoint keeps
+  the new prefix stable;
 - file-backed memory written only by the agent's `Remember` tool (strict admission
   criteria in the tool description and prompt); records are injected into the newest
   user message, so the cached system prefix stays stable. `/memory [list|forget X]`

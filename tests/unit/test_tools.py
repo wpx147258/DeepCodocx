@@ -151,3 +151,47 @@ def test_remember_is_registered_only_with_a_memory_store(tmp_path: Path) -> None
     # The description carries the strict admission criteria.
     assert "rarely" in remember.spec.description
     assert "Do not save task state" in remember.spec.description
+
+
+async def test_large_tool_output_is_spilled_at_creation(tmp_path: Path) -> None:
+    from cli_agent.context.spill import SPILL_THRESHOLD_CHARS, SpillStore
+    from cli_agent.messages import ToolUseBlock
+    from cli_agent.permissions.policy import PermissionMode, PermissionPolicy
+    from cli_agent.tools.base import ToolResult, ToolSpec
+    from cli_agent.tools.execution import ToolExecutor
+    from cli_agent.tools.registry import ToolRegistry
+
+    class SizedTool:
+        spec = ToolSpec(
+            "Sized",
+            "sized output",
+            {"type": "object", "properties": {}, "additionalProperties": False},
+            category="read",
+        )
+
+        def __init__(self, size: int) -> None:
+            self.size = size
+
+        async def run(self, args, ctx):
+            return ToolResult.text("x" * self.size)
+
+    async def _run(tool, root: Path) -> object:
+        registry = ToolRegistry()
+        registry.register(tool)
+        executor = ToolExecutor(registry, spill=SpillStore(root / "spills"))
+        prepared = await executor.prepare(
+            ToolUseBlock("t1", "Sized", {}),
+            policy=PermissionPolicy(PermissionMode.BYPASS, workspace=root),
+            asker=None,
+        )
+        return await executor.run(prepared, ctx=_ctx(root))
+
+    big = await _run(SizedTool(SPILL_THRESHOLD_CHARS + 1_000), tmp_path / "big")
+    assert big.text_content().startswith("[tool output spilled:")
+    files = list((tmp_path / "big" / "spills").glob("*.txt"))
+    assert len(files) == 1
+    assert files[0].stat().st_size == SPILL_THRESHOLD_CHARS + 1_000
+
+    small = await _run(SizedTool(200), tmp_path / "small")
+    assert small.text_content() == "x" * 200
+    assert not list((tmp_path / "small" / "spills").glob("*.txt"))
