@@ -134,3 +134,24 @@ def test_history_renders_the_resumed_conversation() -> None:
     console, output = _console()
     Renderer(console=console).history(messages, limit=1)
     assert "2 earlier message(s) hidden" in output.getvalue()
+
+
+def test_turn_summary_shows_turn_and_session_cost() -> None:
+    from cli_agent.events import AgentUsage
+    from cli_agent.messages import Usage
+
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.render(
+        AgentUsage(
+            Usage(1_000, 200, 100),
+            Usage(4_000_000, 285_000, 65_000_000),
+        )
+    )
+    renderer.render(
+        AgentTurnFinished("end_turn", Usage(4_000_000, 285_000, 65_000_000))
+    )
+    text = output.getvalue()
+    assert "1.0k in / 200 out" in text
+    assert "4.00M in (uncached)" in text
+    assert "cache 94.2% hit" in text

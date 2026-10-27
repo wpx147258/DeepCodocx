@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.text import Text
 
+from ..context.tokens import prompt_tokens
 from ..events import (
     AgentContextEvent,
     AgentError,
@@ -42,6 +43,7 @@ class Renderer:
         self.show_reasoning = show_reasoning
         self._streamed = False
         self._reasoning_open = False
+        self._turn_usage = Usage()
 
     def welcome(
         self,
@@ -132,6 +134,7 @@ class Renderer:
             )
         elif isinstance(event, AgentUsage):
             self.last_usage = event.total
+            self._turn_usage = self._turn_usage + event.turn
         elif isinstance(event, AgentContextEvent):
             self._break_line()
             detail = f" {event.detail}" if event.detail else ""
@@ -147,10 +150,17 @@ class Renderer:
         elif isinstance(event, AgentTurnFinished):
             self._break_line()
             stop = "" if event.stop_reason == "end_turn" else f" · stopped: {event.stop_reason}"
+            turn = self._turn_usage
+            total = event.total
+            prompt = prompt_tokens(total)
+            hit = f"{total.cache_read_tokens / prompt * 100:.1f}%" if prompt else "n/a"
             self.console.print(
-                f"[dim]tokens: in {event.total.input_tokens} / "
-                f"out {event.total.output_tokens}{escape(stop)}[/dim]"
+                f"[dim]tokens: {_tokens(turn.input_tokens)} in / "
+                f"{_tokens(turn.output_tokens)} out · session "
+                f"{_tokens(total.input_tokens)} in (uncached) · cache {hit} hit"
+                f"{escape(stop)}[/dim]"
             )
+            self._turn_usage = Usage()
 
     def notice(self, text: str) -> None:
         self._break_line()
@@ -185,6 +195,7 @@ class PrintRenderer:
         self.failed = False
         self._streamed = False
         self._reasoning_open = False
+        self._turn_usage = Usage()
 
     def render(self, event: AgentEvent) -> None:
         if isinstance(event, AgentTextDelta):
@@ -236,6 +247,14 @@ def _short_json(value: Any, limit: int = 160) -> str:
     except (TypeError, ValueError):
         text = str(value)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _tokens(value: int) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k"
+    return str(value)
 
 
 def _clip(text: str, limit: int) -> str:
