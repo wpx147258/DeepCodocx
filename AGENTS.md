@@ -38,7 +38,8 @@
   system section invalidates the cached prefix.
 - Session records are append-only and must stay forward compatible: ignore unknown
   record types and unknown fields. A resumed session restores its recorded permission
-  mode unless an explicit CLI flag overrides it.
+  mode unless an explicit CLI flag overrides it. Forking copies a session directory
+  under a new id; never mutate the source session.
 - The shell danger guard is approval UX, not a sandbox. Keep the pattern list short and
   high precision, never let `always`, bypass, or `/auto` skip it, and fail closed when
   there is no interactive asker.

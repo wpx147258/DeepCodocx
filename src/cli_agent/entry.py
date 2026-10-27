@@ -77,6 +77,14 @@ def _common_options(f: Any) -> Any:
         is_flag=False,
         help="Resume a session; without an id, resume the latest for this project.",
     )(f)
+    f = click.option(
+        "--fork",
+        is_flag=True,
+        help=(
+            "Copy the resumed session under a new id and continue in the copy; "
+            "the original stays untouched. Requires -c/--resume."
+        ),
+    )(f)
     f = click.option("--verbose", is_flag=True, help="Verbose diagnostics on stderr.")(f)
     return f
 
@@ -100,6 +108,7 @@ def _build_options(
         model=common["model"],
         permission_mode=common["permission_mode"],
         resume_id=common["resume_id"],
+        fork=common["fork"],
         persist=persist,
         max_turns=common["max_turns"],
         memory_enabled=memory_enabled,

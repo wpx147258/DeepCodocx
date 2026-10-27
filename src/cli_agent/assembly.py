@@ -36,6 +36,7 @@ from .providers.base import (
 )
 from .providers.factory import build_provider
 from .runtime import AgentRuntime, ProviderSlot, RuntimeDeps
+from .session.fork import fork_session
 from .session.paths import latest_session_id
 from .session.store import SessionStore
 from .tools.base import ToolContext
@@ -114,6 +115,7 @@ class BuildOptions:
     model: str | None = None
     permission_mode: str | None = None
     resume_id: str | None = None
+    fork: bool = False
     persist: bool = True
     max_turns: int | None = None
     memory_enabled: bool | None = None
@@ -133,6 +135,7 @@ class RuntimeBundle:
     session_id: str
     resumed: bool = False
     degraded: bool = False
+    forked_from: str | None = None
 
 
 def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
@@ -151,6 +154,9 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     )
 
     resumed = options.resume_id is not None
+    if options.fork and not resumed:
+        raise ConfigError("--fork requires --resume/-c")
+    forked_from: str | None = None
     store: SessionStore | None = None
     checkpoint: ContextCheckpoint | None = None
     initial_usage = Usage()
@@ -166,6 +172,11 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             if latest is None:
                 raise ConfigError("no saved sessions are available to resume")
             session_id = latest
+        if options.fork:
+            # Fork first, then open the copy: the source may be open in another
+            # process and is never touched.
+            forked_from = session_id
+            session_id = fork_session(config.paths, session_id)
         store, loaded = SessionStore.resume(
             config.paths, session_id, persist=options.persist
         )
@@ -314,6 +325,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         session_id=store.session_id,
         resumed=resumed,
         degraded=degraded,
+        forked_from=forked_from,
     )
 
 

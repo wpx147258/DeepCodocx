@@ -352,3 +352,39 @@ def test_global_options_apply_to_run(tmp_path: Path, monkeypatch) -> None:
     )
     assert result.exit_code == 0
     assert captured["options"].provider == "deepseek"
+
+
+def test_fork_requires_a_resume_target(tmp_path: Path) -> None:
+    result = CliRunner().invoke(main, ["run", "--fork", "hi"], env=_env(tmp_path))
+    assert result.exit_code == 1
+    assert "--fork requires" in result.output
+
+
+def test_fork_flag_reaches_build_options(tmp_path: Path, monkeypatch) -> None:
+    class FakeRuntime:
+        async def run_turn(self, text: str):
+            yield AgentTextDelta("ok")
+            yield AgentTurnFinished("end_turn", Usage())
+
+        async def close(self) -> None:
+            return None
+
+    bundle = SimpleNamespace(
+        runtime=FakeRuntime(),
+        profile=SimpleNamespace(model="m", provider_name="p"),
+        session_id="s",
+        degraded=False,
+    )
+    captured = {}
+
+    def fake_build(options):
+        captured["options"] = options
+        return bundle
+
+    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    result = CliRunner().invoke(
+        main, ["run", "-c", "--fork", "hi"], env=_env(tmp_path)
+    )
+    assert result.exit_code == 0
+    assert captured["options"].fork is True
+    assert captured["options"].resume_id == "latest"

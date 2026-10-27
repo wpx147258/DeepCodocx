@@ -53,3 +53,14 @@ async def test_run_repl_notes_an_empty_resume(monkeypatch, capsys) -> None:
     await run_repl(_bundle(runtime))
 
     assert "Resumed an empty session." in capsys.readouterr().out
+
+
+async def test_run_repl_notes_a_fork(monkeypatch, capsys) -> None:
+    runtime = _Runtime(())
+    bundle = _bundle(runtime)
+    bundle.forked_from = "sess_old"
+    monkeypatch.setattr("cli_agent.cli.repl.read_user_input", lambda: None)
+
+    await run_repl(bundle)
+
+    assert "Forked from session sess_old." in capsys.readouterr().out

@@ -113,6 +113,8 @@ In headless mode there is no interactive permission asker: use
 cli-agent                              # interactive REPL
 cli-agent -c                           # resume the latest REPL session
 cli-agent --resume <session-id>
+cli-agent -c --fork                    # fork the latest session into a copy
+cli-agent --resume <session-id> --fork
 cli-agent --permission-mode default
 cli-agent --provider deepseek           # REPL, defaults to deepseek-flash[1M] + thinking
 cli-agent --provider deepseek --no-extended-thinking
@@ -133,6 +135,10 @@ Common options may be placed before or after `run` (for example
 
 On resume, explicit `--provider`/`--model` override the saved session. If you
 change the provider without a model, the new provider's default model is used.
+
+`--fork` copies the resumed session (history, usage, checkpoint, spills) under a new
+id and continues in the copy; the original stays untouched and may even be open in
+another process. The REPL prints the session it was forked from.
 
 `--extended-thinking` is a request capability: it sends the provider's `thinking`
 parameter and requires the selected provider/model to declare `supports_thinking`.
@@ -212,7 +218,8 @@ Implemented today:
   tool schemas on profiles with `prompt_caching = true`;
 - permission modes, allow/deny rules, workspace boundary, interactive and
   fail-closed non-interactive asks, and `/auto` for full-permission mode;
-- append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
+- append-only JSONL sessions, `-c/--resume`, `--fork` into a copied session, transcript
+  repair, context checkpoints;
 - append-only history: earlier messages are never rewritten to save tokens, so the
   provider's prefix cache stays valid. Oversized tool output is spilled once, when it
   is produced, and the transcript stores the pointer;
