@@ -256,3 +256,20 @@ prompt_caching = false
     assert config.models["deepseek-flash[1M]"].prompt_caching is False
     profile = build_profile(config, config.providers["deepseek"], "deepseek-flash[1M]")
     assert profile.prompt_caching is False
+
+
+def test_image_capability_defaults_and_overrides(tmp_path: Path) -> None:
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.providers["anthropic"].supports_images is True
+    assert config.providers["deepseek"].supports_images is True
+    profile = build_profile(config, config.providers["deepseek"], "deepseek-flash[1M]")
+    assert profile.supports_images is True
+
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        '[models."text-only"]\nsupports_images = false\n', encoding="utf-8"
+    )
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    profile = build_profile(config, config.providers["deepseek"], "text-only")
+    assert profile.supports_images is False

@@ -396,3 +396,31 @@ async def test_prompt_caching_is_opt_in() -> None:
     [event async for event in provider.stream(request)]
     assert client.messages.params["system"] == "stable instructions\n\ndynamic memory"
     assert "cache_control" not in client.messages.params["tools"][0]
+
+
+def test_image_is_forwarded_when_supported() -> None:
+    message = Message(
+        id="m1",
+        role="user",
+        content=(ImageBlock("image/png", "abc"),),
+        created_at=now_iso(),
+    )
+    wire = _messages_to_wire((message,), _profile(supports_images=True))
+    assert wire[0]["content"] == [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+        }
+    ]
+
+
+def test_tool_result_image_is_forwarded_when_supported() -> None:
+    message = Message(
+        id="m1",
+        role="user",
+        content=(ToolResultBlock("t1", (ImageBlock("image/png", "abc"),)),),
+        created_at=now_iso(),
+    )
+    wire = _messages_to_wire((message,), _profile(supports_images=True))
+    assert wire[0]["content"][0]["content"][0]["type"] == "image"
+    assert wire[0]["content"][0]["is_error"] is False

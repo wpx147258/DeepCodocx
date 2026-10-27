@@ -192,6 +192,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         default_model="deepseek-flash[1M]",
         context_window=1_000_000,
         max_output_tokens=128_000,
+        supports_images=True,
         # Verified against DeepSeek's Anthropic-compatible endpoint.
         supports_thinking=True,
         thinking_by_default=True,

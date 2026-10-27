@@ -139,6 +139,9 @@ Implemented today:
 - explicit provider abstraction plus the Anthropic-compatible adapter
   (Anthropic, DeepSeek, Kimi, MiniMax, GLM presets);
 - `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`;
+- image input: `Read` returns image blocks for png/jpeg/gif/webp, and presets
+  declaring `supports_images` (`anthropic`, `deepseek`) forward them; other profiles
+  receive a text placeholder instead;
 - ordered tool execution inside the one loop: permission checks stay serialized, and
   consecutive `concurrency_safe` reads run in parallel while writes and shells act as
   barriers;

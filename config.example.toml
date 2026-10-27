@@ -13,6 +13,7 @@ context_window = 880000
 max_output_tokens = 256000
 supports_thinking = true
 thinking_by_default = true
+supports_images = true
 # Emit cache_control breakpoints for the static system prefix and tool schemas.
 # Off for third-party endpoints by default; enable only if the host accepts it.
 # prompt_caching = true

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
+from cli_agent.messages import ImageBlock
 from cli_agent.tools.base import ToolContext
 from cli_agent.tools.builtin.bash import BashTool
 from cli_agent.tools.builtin.files import EditTool, ReadTool, WriteTool
@@ -115,3 +117,20 @@ async def test_glob_skips_dependency_directories(tmp_path: Path) -> None:
 async def test_bash_reports_exit_code_marker(tmp_path: Path) -> None:
     result = await BashTool().run({"command": "exit 7"}, _ctx(tmp_path))
     assert "[exit code: 7]" in result.text_content()
+
+
+_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+async def test_read_returns_an_image_block(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    (tmp_path / "dot.png").write_bytes(_PNG)
+    result = await ReadTool().run({"path": "dot.png"}, ctx)
+    assert not result.is_error
+    assert len(result.content) == 1
+    block = result.content[0]
+    assert isinstance(block, ImageBlock)
+    assert block.media_type == "image/png"
+    assert base64.b64decode(block.data) == _PNG
