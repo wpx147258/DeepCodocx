@@ -137,3 +137,17 @@ def test_load_project_instructions_and_includes(tmp_path: Path) -> None:
     text = load_project_instructions(tmp_path)
     assert "Included rule." in text
     assert "Local rule." in text
+
+
+def test_memory_guidance_appears_when_memory_is_enabled(tmp_path: Path) -> None:
+    context = replace(_context(tmp_path), memory_enabled=True)
+    sections = {section.name: section.text for section in PromptBuilder().build(context)}
+    assert "memory" in sections
+    assert "call Remember" in sections["memory"]
+    assert "Never save task state" in sections["memory"]
+    assert "Most turns need no call" in sections["memory"]
+
+
+def test_memory_section_is_absent_when_memory_is_disabled(tmp_path: Path) -> None:
+    context = replace(_context(tmp_path), memory_enabled=False)
+    assert "memory" not in [section.name for section in PromptBuilder().build(context)]

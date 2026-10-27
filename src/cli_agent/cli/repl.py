@@ -88,8 +88,6 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
         except Exception as exc:  # noqa: BLE001 - keep the REPL alive
             renderer.error(f"{type(exc).__name__}: {exc}")
 
-    if runtime.has_pending_extraction:
-        renderer.notice("Finishing memory extraction...")
     await runtime.close()
     return 0
 

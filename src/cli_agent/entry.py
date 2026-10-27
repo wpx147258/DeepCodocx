@@ -74,7 +74,7 @@ from .errors import CliAgentError
     default=None,
     help="Token budget for extended thinking (default 4096; must be below max output).",
 )
-@click.option("--no-memory", is_flag=True, help="Disable memory selection and extraction.")
+@click.option("--no-memory", is_flag=True, help="Disable memory: no catalog in the prompt and no Remember tool.")
 @click.option("--verbose", is_flag=True, help="Verbose diagnostics on stderr.")
 @click.version_option(version=__version__, prog_name="cli-agent")
 @click.argument("prompt", required=False)

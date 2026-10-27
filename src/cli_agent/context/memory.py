@@ -1,32 +1,33 @@
-"""File-backed memory: store, lexical selection, extraction, coalescing.
+"""File-backed memory records and lexical selection.
 
-One record is one Markdown file. ``MEMORY.md`` is rebuilt from files, never
-appended by hand. Writes are atomic and guarded by a store lock.
+One record is one Markdown file with frontmatter. ``MEMORY.md`` is rebuilt from
+the files, never appended by hand. Writes are atomic and guarded by a store lock.
+
+Records are written only by the agent through the ``Remember`` tool. There is no
+background summarizer: durable user preferences are rare, and extracting them
+from every few turns produced noise instead of signal.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import logging
 import os
 import re
 import tempfile
-import time
-from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
-from ..messages import Message
 from ..session.lock import FileLock
 
 logger = logging.getLogger(__name__)
 
 MemoryType = Literal["user", "feedback", "project", "reference"]
-_MEMORY_TYPES = {"user", "feedback", "project", "reference"}
+MEMORY_TYPES: tuple[MemoryType, ...] = ("user", "feedback", "project", "reference")
+_MEMORY_TYPES = set(MEMORY_TYPES)
 _SLUG = re.compile(r"[^a-z0-9]+")
 _SECRET = re.compile(
     r"(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*\S+|sk-[A-Za-z0-9_-]{12,}"
@@ -41,6 +42,10 @@ class MemoryRecord:
     content: str
     path: Path | None = None
     updated_at: str = ""
+
+
+def looks_like_secret(text: str) -> bool:
+    return _SECRET.search(text) is not None
 
 
 class MemoryStore:
@@ -119,13 +124,6 @@ class MemoryStore:
             self._rebuild_index_unlocked()
         return path
 
-    def save_many(self, records: Iterable[MemoryRecord]) -> list[Path]:
-        self.root.mkdir(parents=True, exist_ok=True)
-        with FileLock(self.lock_path):
-            paths = [self._write_record(record) for record in records]
-            self._rebuild_index_unlocked()
-        return paths
-
     def _write_record(self, record: MemoryRecord) -> Path:
         slug = _slugify(record.name)
         if not slug:
@@ -155,216 +153,6 @@ class MemoryStore:
             description = f" — {record.description}" if record.description else ""
             lines.append(f"- [{record.name}]({file_name}){description}")
         _atomic_write(self.index_path, ("\n".join(lines) + "\n").encode("utf-8"))
-
-
-class MemoryExtractor:
-    def __init__(
-        self,
-        store: MemoryStore,
-        complete: Callable[[str], Awaitable[str]],
-        *,
-        max_conversation_chars: int = 20_000,
-    ) -> None:
-        self.store = store
-        self.complete = complete
-        self.max_conversation_chars = max_conversation_chars
-
-    async def extract(self, messages: tuple[Message, ...]) -> list[MemoryRecord]:
-        conversation = _conversation_text(messages)[- self.max_conversation_chars :]
-        if not conversation.strip():
-            return []
-        raw = await self.complete(_EXTRACTION_PROMPT.format(conversation=conversation))
-        entries = _parse_json_array(raw)
-        existing = {record.name.lower() for record in self.store.all()}
-        records: list[MemoryRecord] = []
-        for entry in entries:
-            record = _record_from_entry(entry)
-            if record is None:
-                continue
-            if record.name.lower() in existing:
-                continue
-            existing.add(record.name.lower())
-            records.append(record)
-            if len(records) >= 5:
-                break
-        if records:
-            self.store.save_many(records)
-        return records
-
-
-class ExtractionCoordinator:
-    """Single-flight extraction with a dirty rerun."""
-
-    def __init__(
-        self,
-        min_new_messages: int = 8,
-        cooldown_seconds: float = 0.0,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self.min_new_messages = max(1, min_new_messages)
-        self.cooldown_seconds = max(0.0, cooldown_seconds)
-        self._clock = clock
-        self._running = False
-        self._dirty = False
-        self._last_count = 0
-        self._last_extraction_at: float | None = None
-        self._lock = asyncio.Lock()
-
-    async def request(
-        self,
-        snapshot: Callable[[], tuple[Message, ...]],
-        extractor: MemoryExtractor,
-    ) -> list[MemoryRecord]:
-        if self._running:
-            self._dirty = True
-            return []
-        saved: list[MemoryRecord] = []
-        async with self._lock:
-            self._running = True
-            try:
-                while True:
-                    self._dirty = False
-                    messages = snapshot()
-                    visible = _visible_count(messages)
-                    now = self._clock()
-                    cooled_down = (
-                        self._last_extraction_at is None
-                        or now - self._last_extraction_at >= self.cooldown_seconds
-                    )
-                    if (
-                        visible - self._last_count >= self.min_new_messages
-                        and cooled_down
-                    ):
-                        saved.extend(await extractor.extract(messages))
-                        self._last_count = visible
-                        self._last_extraction_at = self._clock()
-                    if not self._dirty:
-                        break
-            except Exception as exc:  # noqa: BLE001 - extraction is best effort
-                # Background memory extraction is optional. A provider hiccup is
-                # not a crash; keep one actionable line instead of a traceback.
-                logger.warning("memory extraction skipped: %s", exc)
-            finally:
-                self._running = False
-        return saved
-
-
-class ExtractionRunner:
-    """Owns the single background extraction task and drains it at shutdown.
-
-    The runtime schedules after a completed turn and never waits inline; a
-    failure is logged once and stays out of the agent turn.
-    """
-
-    def __init__(
-        self,
-        coordinator: ExtractionCoordinator,
-        extractor: MemoryExtractor,
-        snapshot: Callable[[], tuple[Message, ...]],
-    ) -> None:
-        self.coordinator = coordinator
-        self.extractor = extractor
-        self.snapshot = snapshot
-        self._task: asyncio.Task[None] | None = None
-
-    @property
-    def pending(self) -> bool:
-        return self._task is not None and not self._task.done()
-
-    def schedule(self) -> None:
-        if self.pending:
-            return
-        self._task = asyncio.create_task(self._run())
-
-    async def drain(self, timeout: float = 15.0) -> None:
-        task, self._task = self._task, None
-        if task is None:
-            return
-        if not task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-            except (TimeoutError, asyncio.CancelledError, Exception):
-                task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-
-    async def _run(self) -> None:
-        try:
-            await self.coordinator.request(self.snapshot, self.extractor)
-        except Exception as exc:  # noqa: BLE001 - extraction is best effort
-            logger.warning("memory extraction task failed: %s", exc)
-
-
-_EXTRACTION_PROMPT = """You extract durable memories from a coding-agent conversation.
-Return ONLY a JSON array. Each item must have:
-  "name": short kebab-case identifier,
-  "description": one line,
-  "type": one of user | feedback | project | reference,
-  "content": the durable fact, with why and how to apply when relevant.
-
-Rules:
-- Save only facts useful in future sessions: user preferences, project constraints,
-  recurring feedback, external references.
-- Do not save secrets, credentials, transient task state, or anything already obvious
-  from the repository.
-- Do not save the current request or plans that will be obsolete tomorrow.
-- If nothing is worth saving, return [].
-
-Conversation:
-{conversation}
-"""
-
-
-def _visible_count(messages: tuple[Message, ...]) -> int:
-    return sum(1 for message in messages if message.role in ("user", "assistant"))
-
-
-def _conversation_text(messages: tuple[Message, ...]) -> str:
-    parts: list[str] = []
-    for message in messages:
-        for block in message.content:
-            text = getattr(block, "text", None)
-            if isinstance(text, str):
-                parts.append(f"{message.role}: {text}")
-            elif getattr(block, "type", "") == "tool_use":
-                parts.append(f"{message.role} tool call: {getattr(block, 'name', '')}")
-    return "\n".join(parts)
-
-
-def _parse_json_array(raw: str) -> list[object]:
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-    try:
-        data = json.loads(raw[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
-
-
-def _record_from_entry(entry: object) -> MemoryRecord | None:
-    if not isinstance(entry, dict):
-        return None
-    name = entry.get("name")
-    description = entry.get("description", "")
-    memory_type = entry.get("type", "project")
-    content = entry.get("content")
-    if not isinstance(name, str) or not isinstance(content, str):
-        return None
-    if memory_type not in _MEMORY_TYPES:
-        memory_type = "project"
-    if not name.strip() or not content.strip():
-        return None
-    if _SECRET.search(content):
-        return None
-    return MemoryRecord(
-        name=name.strip(),
-        description=str(description).strip(),
-        type=cast(MemoryType, memory_type),
-        content=content.strip(),
-    )
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:

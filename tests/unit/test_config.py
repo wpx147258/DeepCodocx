@@ -196,38 +196,26 @@ def test_model_override_holds_only_explicit_fields(tmp_path: Path) -> None:
     assert model.max_output_tokens == 4096
 
 
-def test_memory_extraction_settings(tmp_path: Path) -> None:
+def test_memory_enabled_settings(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text("[memory]\nenabled = false\n", encoding="utf-8")
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.memory_enabled is False
+
+
+def test_memory_is_enabled_by_default(tmp_path: Path) -> None:
+    assert load_config(cwd=tmp_path, env=_env(tmp_path)).memory_enabled is True
+
+
+def test_legacy_extraction_knobs_are_ignored(tmp_path: Path) -> None:
     config_dir = tmp_path / "config" / "cli-agent"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
-        """
-[memory]
-enabled = true
-extraction_min_new_messages = 12
-extraction_cooldown_seconds = 300
-""",
+        "[memory]\nenabled = true\nextraction_min_new_messages = 12\n",
         encoding="utf-8",
     )
-    config = load_config(cwd=tmp_path, env=_env(tmp_path))
-    assert config.memory_enabled is True
-    assert config.memory_extraction_min_new_messages == 12
-    assert config.memory_extraction_cooldown_seconds == 300
-
-
-def test_memory_extraction_defaults(tmp_path: Path) -> None:
-    config = load_config(cwd=tmp_path, env=_env(tmp_path))
-    assert config.memory_extraction_min_new_messages == 8
-    assert config.memory_extraction_cooldown_seconds == 60
-
-
-def test_memory_extraction_validation(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
-    config_dir.mkdir(parents=True)
-    (config_dir / "config.toml").write_text(
-        "[memory]\nextraction_min_new_messages = 0\n", encoding="utf-8"
-    )
-    with pytest.raises(ConfigError, match="at least 1"):
-        load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert load_config(cwd=tmp_path, env=_env(tmp_path)).memory_enabled is True
 
 
 def test_prompt_caching_defaults_and_overrides(tmp_path: Path) -> None:

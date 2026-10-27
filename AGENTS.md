@@ -28,9 +28,12 @@
 - Tool concurrency is opt-in per tool (`concurrency_safe`). Authorization and permission
   prompts stay serialized in call order; the runtime may only parallelize consecutive
   safe calls, and results must keep the model's call order.
-- Background helpers (summarization, memory extraction) are best-effort: retry
-  `retryable` provider errors, cap total time, and log a single warning rather than a
-  traceback. Do not let a background failure surface as an agent turn error.
+- Background helpers (summarization) are best-effort: retry `retryable` provider
+  errors, cap total time, and log a single warning rather than a traceback. Do not let
+  a background failure surface as an agent turn error.
+- Memory is written only by the model through the `Remember` tool, with strict
+  criteria (durable user preferences, not task state). Do not reintroduce background
+  extraction or per-turn summarization of the whole conversation.
 - Session records are append-only and must stay forward compatible: ignore unknown
   record types and unknown fields. A resumed session restores its recorded permission
   mode unless an explicit CLI flag overrides it.

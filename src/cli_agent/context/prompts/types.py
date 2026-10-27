@@ -22,4 +22,5 @@ class PromptContext:
     project_instructions: str
     active_request: str
     compaction_active: bool = False
+    memory_enabled: bool = False
     agent_name: str = "cli-agent"

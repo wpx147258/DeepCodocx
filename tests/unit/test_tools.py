@@ -134,3 +134,20 @@ async def test_read_returns_an_image_block(tmp_path: Path) -> None:
     assert isinstance(block, ImageBlock)
     assert block.media_type == "image/png"
     assert base64.b64decode(block.data) == _PNG
+
+
+def test_remember_is_registered_only_with_a_memory_store(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryStore
+    from cli_agent.context.skills import SkillLoader
+    from cli_agent.tools.builtin import build_builtin_registry
+
+    plain = build_builtin_registry(SkillLoader([]))
+    assert plain.get("Remember") is None
+
+    store = MemoryStore(tmp_path / "memory")
+    with_memory = build_builtin_registry(SkillLoader([]), memory=store)
+    remember = with_memory.get("Remember")
+    assert remember is not None
+    # The description carries the strict admission criteria.
+    assert "rarely" in remember.spec.description
+    assert "Do not save task state" in remember.spec.description

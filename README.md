@@ -61,9 +61,8 @@ thinking_by_default = true
 budget_tokens = 100000  # must be below max_output_tokens
 
 [memory]
+# The agent writes memory through the Remember tool; no background extraction.
 enabled = true
-extraction_min_new_messages = 8   # require at least this many new visible messages
-extraction_cooldown_seconds = 60  # minimum gap between extraction attempts
 ```
 
 ## Usage
@@ -100,7 +99,8 @@ estimated size of the last request against the context window. Provider `input_t
 excludes the cached prefix, so prompt size is input + cache reads + cache writes; the
 token estimator and its calibration use that sum.
 
-Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
+Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`, and
+`Remember` when memory is enabled.
 `Glob` skips dependency and build directories unless the pattern or `path` names one.
 Consecutive read-only calls (`concurrency_safe`) in one turn run in parallel; writes and
 shell commands stay ordered barriers, and permission prompts are always serialized.
@@ -156,17 +156,14 @@ Implemented today:
   fail-closed non-interactive asks, and `/auto` for full-permission mode;
 - append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
 - ordered context compaction (spill, prune, snip, summarize), reactive compaction;
-- file-backed memory with lexical selection, background extraction, and a
-  single-flight coordinator;
+- file-backed memory written only by the agent's `Remember` tool (strict admission
+  criteria in the tool description and prompt), selected lexically into the prompt;
 - skills from `~/.config/cli-agent/skills` and `.agents/skills`;
 - extended thinking requests for providers that support them (Anthropic and DeepSeek
   presets; opt in another provider with `supports_thinking = true`), with provider
   defaults (`thinking_by_default`), budget validation, and signed-reasoning replay
   after tool calls. The DeepSeek preset defaults to `deepseek-flash[1M]` with thinking
   on;
-- throttled background memory extraction (new-message threshold + cooldown, both
-  configurable) with retryable provider errors retried and non-fatal failures logged
-  as warnings rather than tracebacks;
 - streaming reasoning display: on by default in the REPL, off in print mode;
   `--thinking/--no-thinking` overrides it (print mode writes reasoning to stderr);
 - REPL, `-p/--print`, and `/help /clear /compact /model /auto /cost /exit`.
@@ -175,8 +172,7 @@ Deliberately deferred: MCP, external hook processes, subagents, teams, worktrees
 cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, plan
 mode, tool search, OpenAI-compatible adapter, and a public plugin SDK.
 
-Notes: compaction and memory extraction are best-effort; on a clean REPL exit the
-runtime waits briefly for in-flight extraction. Permission rules are approval UX,
+Notes: compaction is best-effort. Permission rules are approval UX,
 not a sandbox — use an external sandbox for untrusted work. DeepSeek-compatible
 endpoints may emit reasoning even without `--extended-thinking`; the display flag
 still controls whether it is shown.

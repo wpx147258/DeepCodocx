@@ -14,12 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import AppConfig, load_config
-from .context.memory import (
-    ExtractionCoordinator,
-    ExtractionRunner,
-    MemoryExtractor,
-    MemoryStore,
-)
+from .context.memory import MemoryStore
 from .context.pipeline import ContextCheckpoint, ContextPipeline
 from .context.prompts import PromptBuilder, load_project_instructions
 from .context.skills import SkillLoader
@@ -66,8 +61,8 @@ async def _complete_request(
 ) -> str:
     """Run a tool-free helper request, retrying retryable provider failures.
 
-    Summaries and memory extraction are best-effort background work. They do not
-    share the main loop's recovery state, so a small local retry is enough.
+    Summaries are best-effort background work. They do not share the main loop's
+    recovery state, so a small local retry is enough.
     """
     last: ProviderFailure | None = None
     for attempt in range(max_attempts):
@@ -205,7 +200,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         config.paths.project_skills_dir,
     )
     memory_store = MemoryStore(config.paths.memory_dir) if memory_enabled else None
-    registry = build_builtin_registry(skill_loader)
+    registry = build_builtin_registry(skill_loader, memory=memory_store)
     rules = PermissionRules(
         allow=tuple(
             PermissionRule(rule.tool, dict(rule.args)) for rule in config.allow_rules
@@ -262,20 +257,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         config.paths.cwd, config.paths.global_agents_md
     )
 
-    extraction: ExtractionRunner | None = None
-    if memory_store is not None:
-        async def extract_complete(prompt: str) -> str:
-            return await complete(prompt, 2_000)
-
-        extraction = ExtractionRunner(
-            ExtractionCoordinator(
-                min_new_messages=config.memory_extraction_min_new_messages,
-                cooldown_seconds=config.memory_extraction_cooldown_seconds,
-            ),
-            MemoryExtractor(memory_store, extract_complete),
-            lambda: transcript.messages,
-        )
-
     def provider_factory(
         provider_name: str, model: str
     ) -> tuple[Provider, ModelProfile, ThinkingConfig | None]:
@@ -312,7 +293,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         initial_usage=initial_usage,
         max_turns=config.max_turns,
         memory=memory_store,
-        extraction=extraction,
         provider_factory=provider_factory,
         thinking=thinking,
         on_model_switch=on_model_switch,

@@ -144,7 +144,6 @@ def make_runtime(
         initial_usage=Usage(),
         max_turns=max_turns,
         memory=None,
-        extraction=None,
         thinking=thinking,
     )
     return AgentRuntime(deps), session

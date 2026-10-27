@@ -12,7 +12,7 @@ import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 
-from .context.memory import ExtractionRunner, MemoryStore
+from .context.memory import MemoryStore
 from .context.pipeline import ContextPipeline
 from .context.prompts import PromptBuilder, PromptContext
 from .context.skills import SkillLoader
@@ -82,11 +82,10 @@ class RuntimeDeps:
     initial_usage: Usage = field(default_factory=Usage)
     max_turns: int = 50
     memory: MemoryStore | None = None
-    extraction: ExtractionRunner | None = None
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
-    # Lets the host re-point background helpers (summarization, memory
-    # extraction) at the provider that is actually active after a model switch.
+    # Lets the host re-point the background summarizer at the provider that is
+    # actually active after a model switch.
     on_model_switch: Callable[[Provider, ModelProfile], None] | None = None
 
 
@@ -105,7 +104,7 @@ class AgentRuntime:
         self._active_request = ""
         self._last_request_tokens = 0
         # Providers replaced by /model. They stay open until shutdown because a
-        # summary or extraction call may still hold one.
+        # background summary call may still hold one.
         self._retired: list[Provider] = []
         self._permissions = PermissionController(
             deps.policy,
@@ -133,10 +132,6 @@ class AgentRuntime:
     @property
     def provider_name(self) -> str:
         return self._deps.profile.provider_name
-
-    @property
-    def has_pending_extraction(self) -> bool:
-        return self._deps.extraction is not None and self._deps.extraction.pending
 
     @property
     def thinking(self) -> ThinkingConfig | None:
@@ -230,15 +225,12 @@ class AgentRuntime:
                     turns -= 1
                     continue
                 yield AgentError(failure.message, failure.kind, failure.status_code)
-                self._after_turn("error")
                 return
             except asyncio.CancelledError:
-                self._after_turn("cancelled")
                 raise
 
             if attempt.assistant is None:
                 yield AgentError("provider stream ended without a final message", "fatal")
-                self._after_turn("error")
                 return
 
             self._append(attempt.assistant)
@@ -262,7 +254,6 @@ class AgentRuntime:
                 yield tool_event
             recovery.continuations = 0
 
-        self._after_turn("max_turns")
         yield AgentTurnFinished("max_turns", self._usage)
 
     async def compact(self) -> AsyncIterator[AgentEvent]:
@@ -310,8 +301,6 @@ class AgentRuntime:
         self._deps.session.append_model(profile.provider_name, profile.model)
 
     async def close(self) -> None:
-        if self._deps.extraction is not None:
-            await self._deps.extraction.drain()
         retired, self._retired = self._retired, []
         try:
             await self._deps.provider.aclose()
@@ -341,6 +330,7 @@ class AgentRuntime:
             project_instructions=self._deps.project_instructions,
             active_request=self._active_request,
             compaction_active=self._deps.context.checkpoint is not None,
+            memory_enabled=memory is not None,
         )
 
     def _build_request(self, messages: Sequence[Message]) -> tuple[ModelRequest, int]:
@@ -378,7 +368,6 @@ class AgentRuntime:
         # exit non-zero for it.
         reason = attempt.stop_reason
         final_reason: StopReason = "error" if reason == "tool_use" else reason
-        self._after_turn(final_reason)
         return [], final_reason
 
     async def _run_tool_calls(
@@ -413,7 +402,6 @@ class AgentRuntime:
                 if call.id not in completed:
                     results.append(_cancelled_result(call.id))
             self._append(tool_result_message(results))
-            self._after_turn("cancelled")
             raise
 
         self._append(tool_result_message(results))
@@ -439,11 +427,6 @@ class AgentRuntime:
             recovery.reactive_requested = True
             return "reactive", 0.0
         return "fail", 0.0
-
-    def _after_turn(self, stop_reason: str) -> None:
-        if stop_reason != "end_turn" or self._deps.extraction is None:
-            return
-        self._deps.extraction.schedule()
 
 
 def _to_result_block(tool_use_id: str, result: ToolResult) -> ToolResultBlock:

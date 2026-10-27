@@ -24,6 +24,6 @@ supports_images = true
 budget_tokens = 100000  # must be below max_output_tokens
 
 [memory]
+# The agent writes memory itself through the Remember tool; there is no
+# background extraction loop.
 enabled = true
-extraction_min_new_messages = 8   # require at least this many new visible messages
-extraction_cooldown_seconds = 60  # minimum gap between extraction attempts
