@@ -250,6 +250,52 @@ class ExtractionCoordinator:
         return saved
 
 
+class ExtractionRunner:
+    """Owns the single background extraction task and drains it at shutdown.
+
+    The runtime schedules after a completed turn and never waits inline; a
+    failure is logged once and stays out of the agent turn.
+    """
+
+    def __init__(
+        self,
+        coordinator: ExtractionCoordinator,
+        extractor: MemoryExtractor,
+        snapshot: Callable[[], tuple[Message, ...]],
+    ) -> None:
+        self.coordinator = coordinator
+        self.extractor = extractor
+        self.snapshot = snapshot
+        self._task: asyncio.Task[None] | None = None
+
+    @property
+    def pending(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def schedule(self) -> None:
+        if self.pending:
+            return
+        self._task = asyncio.create_task(self._run())
+
+    async def drain(self, timeout: float = 15.0) -> None:
+        task, self._task = self._task, None
+        if task is None:
+            return
+        if not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+            except (TimeoutError, asyncio.CancelledError, Exception):
+                task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+    async def _run(self) -> None:
+        try:
+            await self.coordinator.request(self.snapshot, self.extractor)
+        except Exception as exc:  # noqa: BLE001 - extraction is best effort
+            logger.warning("memory extraction task failed: %s", exc)
+
+
 _EXTRACTION_PROMPT = """You extract durable memories from a coding-agent conversation.
 Return ONLY a JSON array. Each item must have:
   "name": short kebab-case identifier,

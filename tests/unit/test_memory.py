@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cli_agent.context.memory import (
     ExtractionCoordinator,
+    ExtractionRunner,
     MemoryExtractor,
     MemoryRecord,
     MemoryStore,
@@ -134,4 +135,55 @@ async def test_extraction_failure_logs_warning_without_traceback(caplog) -> None
             lambda: (user_message("hi"),), FailingExtractor()  # type: ignore[arg-type]
         )
     assert "memory extraction skipped" in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+async def test_runner_schedules_one_task_and_drains() -> None:
+    gate = asyncio.Event()
+
+    class StubCoordinator:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.started = asyncio.Event()
+
+        async def request(self, snapshot, extractor):
+            self.calls += 1
+            self.started.set()
+            await gate.wait()
+            return []
+
+    coordinator = StubCoordinator()
+    runner = ExtractionRunner(
+        coordinator,  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        lambda: (),
+    )
+    runner.schedule()
+    runner.schedule()  # single flight
+    await asyncio.wait_for(coordinator.started.wait(), timeout=5)
+    assert coordinator.calls == 1
+    assert runner.pending
+
+    gate.set()
+    await runner.drain(timeout=5)
+    assert not runner.pending
+    assert coordinator.calls == 1
+
+
+async def test_runner_does_not_surface_failures(caplog) -> None:
+    import logging
+
+    class FailingCoordinator:
+        async def request(self, snapshot, extractor):
+            raise RuntimeError("background boom")
+
+    runner = ExtractionRunner(
+        FailingCoordinator(),  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        lambda: (),
+    )
+    with caplog.at_level(logging.WARNING):
+        runner.schedule()
+        await runner.drain(timeout=5)
+    assert "memory extraction task failed" in caplog.text
     assert "Traceback" not in caplog.text

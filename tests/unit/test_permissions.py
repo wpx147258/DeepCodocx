@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from cli_agent.errors import ConfigError
+from cli_agent.permissions.controller import PermissionController
 from cli_agent.permissions.policy import (
     NullAsker,
     PermissionMode,
@@ -89,3 +91,45 @@ async def test_always_remembers_tool(tmp_path: Path) -> None:
 async def test_read_is_allowed_in_every_mode(tmp_path: Path, mode: PermissionMode) -> None:
     policy = PermissionPolicy(mode, workspace=tmp_path)
     assert (await policy.authorize(READ, {"path": "a.txt"}, None)).allowed
+
+
+def test_controller_persists_mode_changes(tmp_path: Path) -> None:
+    changes: list[tuple[str, str | None]] = []
+    policy = PermissionPolicy(PermissionMode.DEFAULT, workspace=tmp_path)
+    controller = PermissionController(
+        policy, on_change=lambda mode, previous: changes.append((mode, previous))
+    )
+
+    assert controller.toggle_auto() == "bypass"
+    assert changes == [("bypass", "default")]
+    assert controller.toggle_auto() == "default"
+    assert changes[-1] == ("default", None)
+
+
+def test_controller_restore_does_not_persist(tmp_path: Path) -> None:
+    changes: list[tuple[str, str | None]] = []
+    policy = PermissionPolicy(PermissionMode.DEFAULT, workspace=tmp_path)
+    controller = PermissionController(
+        policy, on_change=lambda mode, previous: changes.append((mode, previous))
+    )
+    controller.restore("bypass", "accept-edits")
+    assert controller.mode == "bypass"
+    assert changes == []
+    # /auto off returns to the mode that was active before auto was enabled.
+    assert controller.set_auto(False) == "accept-edits"
+
+
+def test_controller_rejects_unknown_mode(tmp_path: Path) -> None:
+    controller = PermissionController(
+        PermissionPolicy(PermissionMode.DEFAULT, workspace=tmp_path)
+    )
+    with pytest.raises(ConfigError):
+        controller.set_mode("yolo")
+
+
+def test_controller_ignores_unknown_restored_mode(tmp_path: Path) -> None:
+    controller = PermissionController(
+        PermissionPolicy(PermissionMode.DEFAULT, workspace=tmp_path)
+    )
+    controller.restore("yolo")
+    assert controller.mode == "default"

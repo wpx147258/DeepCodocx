@@ -42,10 +42,21 @@ class Renderer:
         self._streamed = False
         self._reasoning_open = False
 
-    def welcome(self, *, model: str, provider: str, session_id: str) -> None:
+    def welcome(
+        self,
+        *,
+        model: str,
+        provider: str,
+        session_id: str,
+        permission_mode: str = "default",
+    ) -> None:
+        if permission_mode == "bypass":
+            mode = "[yellow]mode: bypass — no approval prompts[/yellow]"
+        else:
+            mode = f"[dim]mode: {escape(permission_mode)}[/dim]"
         self.console.print(
             f"[bold]cli-agent[/bold] · {escape(provider)}/{escape(model)} · "
-            f"session {escape(session_id)}"
+            f"session {escape(session_id)} · {mode}"
         )
         self.console.print("[dim]Type /help for commands, Ctrl+D to exit.[/dim]\n")
 

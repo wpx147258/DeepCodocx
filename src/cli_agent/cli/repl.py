@@ -50,6 +50,7 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
         model=bundle.profile.model,
         provider=bundle.profile.provider_name,
         session_id=bundle.session_id,
+        permission_mode=runtime.permission_mode,
     )
     if bundle.degraded:
         renderer.notice("The resumed session had corrupt records; some were skipped.")

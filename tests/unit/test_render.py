@@ -14,6 +14,20 @@ def _console() -> tuple[Console, StringIO]:
     return Console(file=output, force_terminal=False, width=100), output
 
 
+def test_welcome_shows_the_permission_mode() -> None:
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.welcome(model="m", provider="p", session_id="s", permission_mode="accept-edits")
+    assert "mode: accept-edits" in output.getvalue()
+
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.welcome(model="m", provider="p", session_id="s", permission_mode="bypass")
+    text = output.getvalue()
+    assert "mode: bypass" in text
+    assert "no approval prompts" in text
+
+
 def test_repl_reasoning_has_a_visible_header_and_separator() -> None:
     console, output = _console()
     renderer = Renderer(console=console, show_reasoning=True)

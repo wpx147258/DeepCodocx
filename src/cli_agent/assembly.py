@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import AppConfig, load_config
-from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
+from .context.memory import (
+    ExtractionCoordinator,
+    ExtractionRunner,
+    MemoryExtractor,
+    MemoryStore,
+)
 from .context.pipeline import ContextCheckpoint, ContextPipeline
 from .context.prompts import PromptBuilder, load_project_instructions
 from .context.skills import SkillLoader
@@ -136,6 +141,8 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     store: SessionStore | None = None
     checkpoint: ContextCheckpoint | None = None
     initial_usage = Usage()
+    initial_mode: str | None = None
+    initial_auto_previous: str | None = None
     degraded = False
     transcript = Transcript()
 
@@ -156,6 +163,11 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         model_name = loaded.model or config.default_model
         if loaded.checkpoint:
             checkpoint = ContextCheckpoint.from_dict(loaded.checkpoint)
+        # The session's recorded mode beats the config default, but an explicit
+        # --permission-mode wins over both.
+        if options.permission_mode is None:
+            initial_mode = loaded.permission_mode
+            initial_auto_previous = loaded.auto_previous
     else:
         provider_name = config.default_provider
         model_name = config.default_model
@@ -250,16 +262,18 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         config.paths.cwd, config.paths.global_agents_md
     )
 
-    extractor: MemoryExtractor | None = None
-    coordinator: ExtractionCoordinator | None = None
+    extraction: ExtractionRunner | None = None
     if memory_store is not None:
         async def extract_complete(prompt: str) -> str:
             return await complete(prompt, 2_000)
 
-        extractor = MemoryExtractor(memory_store, extract_complete)
-        coordinator = ExtractionCoordinator(
-            min_new_messages=config.memory_extraction_min_new_messages,
-            cooldown_seconds=config.memory_extraction_cooldown_seconds,
+        extraction = ExtractionRunner(
+            ExtractionCoordinator(
+                min_new_messages=config.memory_extraction_min_new_messages,
+                cooldown_seconds=config.memory_extraction_cooldown_seconds,
+            ),
+            MemoryExtractor(memory_store, extract_complete),
+            lambda: transcript.messages,
         )
 
     def provider_factory(
@@ -298,14 +312,13 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         initial_usage=initial_usage,
         max_turns=config.max_turns,
         memory=memory_store,
-        memory_enabled=memory_enabled,
-        extraction=coordinator,
-        extractor=extractor,
+        extraction=extraction,
         provider_factory=provider_factory,
         thinking=thinking,
         on_model_switch=on_model_switch,
     )
     runtime = AgentRuntime(deps)
+    runtime.restore_permission(initial_mode, initial_auto_previous)
     return RuntimeBundle(
         runtime=runtime,
         config=config,

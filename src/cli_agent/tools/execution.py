@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 
 from ..messages import ToolUseBlock
@@ -112,3 +113,30 @@ class ToolExecutor:
             call, policy=policy, asker=asker, parse_error=parse_error
         )
         return await self.run(prepared, ctx=ctx)
+
+    async def run_all(
+        self, prepared: Sequence[PreparedCall], *, ctx: ToolContext
+    ) -> AsyncIterator[tuple[PreparedCall, ToolResult]]:
+        """Run calls in order, parallelizing consecutive concurrency-safe ones."""
+        for batch in _batches(prepared):
+            if len(batch) == 1:
+                yield batch[0], await self.run(batch[0], ctx=ctx)
+                continue
+            results = await asyncio.gather(*(self.run(item, ctx=ctx) for item in batch))
+            for item, result in zip(batch, results, strict=True):
+                yield item, result
+
+
+def _batches(prepared: Sequence[PreparedCall]) -> Iterator[list[PreparedCall]]:
+    """Group consecutive concurrency-safe calls; anything else is a barrier."""
+    batch: list[PreparedCall] = []
+    for item in prepared:
+        if item.runnable and item.tool is not None and item.tool.spec.concurrency_safe:
+            batch.append(item)
+            continue
+        if batch:
+            yield batch
+            batch = []
+        yield [item]
+    if batch:
+        yield batch

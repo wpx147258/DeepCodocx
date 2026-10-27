@@ -99,8 +99,9 @@ Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
 `Glob` skips dependency and build directories unless the pattern or `path` names one.
 Consecutive read-only calls (`concurrency_safe`) in one turn run in parallel; writes and
 shell commands stay ordered barriers, and permission prompts are always serialized.
-`/auto [on|off]` toggles full-permission mode for the session and remembers the mode it
-replaced.
+`/auto [on|off]` toggles full-permission mode and remembers the mode it replaced. The
+change is appended to the session, so `-c` restores it (an explicit `--permission-mode`
+still wins), and the REPL banner shows the active mode.
 
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from

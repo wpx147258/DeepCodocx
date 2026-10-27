@@ -31,5 +31,8 @@
 - Background helpers (summarization, memory extraction) are best-effort: retry
   `retryable` provider errors, cap total time, and log a single warning rather than a
   traceback. Do not let a background failure surface as an agent turn error.
+- Session records are append-only and must stay forward compatible: ignore unknown
+  record types and unknown fields. A resumed session restores its recorded permission
+  mode unless an explicit CLI flag overrides it.
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

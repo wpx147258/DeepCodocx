@@ -8,6 +8,7 @@ the case where the estimate is still wrong.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from ..messages import (
@@ -63,7 +64,7 @@ class TokenEstimator:
 
     def estimate_request(
         self,
-        messages: tuple[Message, ...] | list[Message],
+        messages: Sequence[Message],
         system: tuple[SystemSection, ...] = (),
         tools: tuple[ToolSpec, ...] = (),
     ) -> int:

@@ -130,3 +130,38 @@ def test_list_sessions_newest_first(tmp_path: Path) -> None:
     ids = list_session_ids(paths)
     assert ids[0] == second_id
     assert first_id in ids
+
+
+def test_permission_mode_round_trip(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_permission_mode("bypass", "accept-edits")
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.permission_mode == "bypass"
+        assert loaded.auto_previous == "accept-edits"
+    finally:
+        resumed.close()
+
+
+def test_latest_permission_record_wins(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_permission_mode("bypass", "accept-edits")
+    store.append_permission_mode("default", None)
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.permission_mode == "default"
+        assert loaded.auto_previous is None
+    finally:
+        resumed.close()
