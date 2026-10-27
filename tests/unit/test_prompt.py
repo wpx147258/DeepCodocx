@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from cli_agent.context.memory import MemoryRecord
 from cli_agent.context.prompts import PromptBuilder, PromptContext, load_project_instructions
 from cli_agent.context.skills import Skill
 from cli_agent.providers.base import ModelProfile
@@ -41,8 +40,6 @@ def _context(tmp_path: Path) -> PromptContext:
         profile=_profile(),
         tools=_tools(),
         skills=(),
-        memory_catalog=(),
-        memories=(),
         project_instructions="",
         active_request="hi",
     )
@@ -109,8 +106,7 @@ def test_project_memory_and_skills_sections(tmp_path: Path) -> None:
     context = replace(
         _context(tmp_path),
         project_instructions="Use tabs.",
-        memory_catalog=("- pref: terse answers",),
-        memories=(MemoryRecord("pref", "terse answers", "user", "Be terse."),),
+        memory_enabled=True,
         skills=(Skill("deploy", "Deploy the app", tmp_path / "SKILL.md", "global"),),
     )
     sections = PromptBuilder().build(context)
@@ -120,9 +116,11 @@ def test_project_memory_and_skills_sections(tmp_path: Path) -> None:
     assert "skills" in names
     text = "\n\n".join(section.text for section in sections)
     assert "Use tabs." in text
-    assert "Be terse." in text
+    assert "Use tabs." in text
     assert "deploy [global]: Deploy the app" in text
-    assert "untrusted" in text
+    # Saved records are injected into the current user message, not the system
+    # prompt, so the cacheable prefix stays stable.
+    assert "Memory catalog" not in text
 
 
 def test_agent_name_is_configurable(tmp_path: Path) -> None:
@@ -138,6 +136,20 @@ def test_load_project_instructions_and_includes(tmp_path: Path) -> None:
     text = load_project_instructions(tmp_path)
     assert "Included rule." in text
     assert "Local rule." in text
+
+
+def test_memory_guidance_appears_when_memory_is_enabled(tmp_path: Path) -> None:
+    context = replace(_context(tmp_path), memory_enabled=True)
+    sections = {section.name: section.text for section in PromptBuilder().build(context)}
+    assert "memory" in sections
+    assert "call Remember" in sections["memory"]
+    assert "Never save task state" in sections["memory"]
+    assert "Most turns need no call" in sections["memory"]
+
+
+def test_memory_section_is_absent_when_memory_is_disabled(tmp_path: Path) -> None:
+    context = replace(_context(tmp_path), memory_enabled=False)
+    assert "memory" not in [section.name for section in PromptBuilder().build(context)]
 
 
 def test_project_include_cannot_escape_workspace(tmp_path: Path) -> None:

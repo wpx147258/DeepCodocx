@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from cli_agent.context.pipeline import SUMMARY_MAX_TOKENS, ContextPipeline
-from cli_agent.context.spill import SpillStore
 from cli_agent.context.tokens import TokenEstimator
 from cli_agent.messages import (
     TextBlock,
@@ -55,7 +54,6 @@ def _pipeline(
     paths = _paths(root)
     return ContextPipeline(
         estimator=TokenEstimator(),
-        spill=SpillStore(paths.spills),
         session_paths=paths,
         summarize=summarize,
         checkpoint=checkpoint,
@@ -67,63 +65,6 @@ def _tool_pair(tool_id: str, text: str) -> list:
         assistant_message([ToolUseBlock(tool_id, "Echo", {"text": "x"})]),
         tool_result_message([ToolResultBlock(tool_id, (TextBlock(text),))]),
     ]
-
-
-def _tool_use_ids(messages) -> set[str]:
-    ids: set[str] = set()
-    for message in messages:
-        for block in message.tool_uses():
-            ids.add(block.id)
-    return ids
-
-
-async def test_large_latest_result_is_spilled(tmp_path: Path) -> None:
-    pipeline = _pipeline(tmp_path / "session")
-    messages = [
-        user_message("do the thing"),
-        *_tool_pair("t1", "x" * 40_000),
-    ]
-    prepared = await pipeline.prepare(
-        Transcript(messages), "do the thing", _profile(20_000)
-    )
-    result_texts = [
-        block.content[0].text
-        for message in prepared.messages
-        for block in message.tool_results()
-    ]
-    assert any(text.startswith("[tool output spilled:") for text in result_texts)
-    spill_files = list((tmp_path / "session" / "spills").glob("*.txt"))
-    assert spill_files
-    assert any(event.kind == "spill" for event in prepared.events)
-
-
-async def test_old_results_are_pruned(tmp_path: Path) -> None:
-    pipeline = _pipeline(tmp_path / "session")
-    messages = [user_message("start")]
-    for index in range(6):
-        messages.extend(_tool_pair(f"t{index}", "y" * 20_000))
-        messages.append(assistant_message([TextBlock(f"step {index}")]))
-    prepared = await pipeline.prepare(Transcript(messages), "start", _profile(20_000))
-    spill_files = list((tmp_path / "session" / "spills").glob("*.txt"))
-    assert len(spill_files) >= 2
-    assert any(event.kind in ("spill", "prune") for event in prepared.events)
-
-
-async def test_snip_archives_and_preserves_tool_pairs(tmp_path: Path) -> None:
-    pipeline = _pipeline(tmp_path / "session")
-    messages = [user_message("start")]
-    for index in range(8):
-        messages.append(assistant_message([TextBlock("z" * 6_000)]))
-        messages.extend(_tool_pair(f"t{index}", "small result"))
-    prepared = await pipeline.prepare(Transcript(messages), "start", _profile(20_000))
-    archives = list((tmp_path / "session" / "archive").glob("*.jsonl"))
-    assert archives
-    assert any(event.kind == "snip" for event in prepared.events)
-    assert any("Earlier conversation archived" in message.text() for message in prepared.messages)
-    ids = _tool_use_ids(prepared.messages)
-    for message in prepared.messages:
-        for result in message.tool_results():
-            assert result.tool_use_id in ids
 
 
 async def test_force_compact_creates_checkpoint(tmp_path: Path) -> None:
@@ -259,3 +200,19 @@ async def test_reactive_skip_is_reported_once(tmp_path: Path) -> None:
     )
     assert sum(event.kind == "compact_skipped" for event in prepared.events) == 1
     assert calls == []
+async def test_history_is_never_rewritten(tmp_path: Path) -> None:
+    pipeline = _pipeline(tmp_path / "session")
+    messages = [user_message("start")]
+    for index in range(6):
+        messages.extend(_tool_pair(f"t{index}", "y" * 20_000))
+        messages.append(assistant_message([TextBlock(f"step {index}")]))
+
+    prepared = await pipeline.prepare(Transcript(messages), "start", _profile(60_000))
+
+    expected = Transcript(messages).for_request()
+    assert [(m.role, m.text()) for m in prepared.messages] == [
+        (m.role, m.text()) for m in expected
+    ]
+    assert not list((tmp_path / "session" / "spills").glob("*.txt"))
+    assert not list((tmp_path / "session" / "archive").glob("*.jsonl"))
+    assert not prepared.events

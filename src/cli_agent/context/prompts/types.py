@@ -7,7 +7,6 @@ from pathlib import Path
 
 from ...providers.base import ModelProfile
 from ...tools.base import ToolSpec
-from ..memory import MemoryRecord
 from ..skills import Skill
 
 
@@ -17,9 +16,8 @@ class PromptContext:
     profile: ModelProfile
     tools: tuple[ToolSpec, ...]
     skills: tuple[Skill, ...]
-    memory_catalog: tuple[str, ...]
-    memories: tuple[MemoryRecord, ...]
     project_instructions: str
     active_request: str
     compaction_active: bool = False
+    memory_enabled: bool = False
     agent_name: str = "cli-agent"

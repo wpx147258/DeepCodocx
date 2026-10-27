@@ -108,6 +108,28 @@ def test_one_shot_error_exit_code(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 2
 
 
+def test_print_mode_refusal_exit_code(tmp_path: Path, monkeypatch) -> None:
+    class FakeRuntime:
+        async def run_turn(self, text: str):
+            yield AgentTextDelta("I can't help with that.")
+            yield AgentTurnFinished("refusal", Usage())
+
+        async def close(self) -> None:
+            return None
+
+    bundle = SimpleNamespace(
+        runtime=FakeRuntime(),
+        profile=SimpleNamespace(model="m", provider_name="p"),
+        session_id="s",
+        degraded=False,
+    )
+    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
+    assert result.exit_code == 2
+    combined = result.output + (getattr(result, "stderr", "") or "")
+    assert "refusal" in combined
+
+
 def test_thinking_flags_reach_build_options(tmp_path: Path, monkeypatch) -> None:
     class FakeRuntime:
         async def run_turn(self, text: str):
@@ -351,6 +373,29 @@ def _bundle() -> SimpleNamespace:
     )
 
 
+def test_fork_requires_a_resume_target(tmp_path: Path) -> None:
+    result = CliRunner().invoke(main, ["run", "--fork", "hi"], env=_env(tmp_path))
+    assert result.exit_code == 1
+    assert "--fork requires" in result.output
+
+
+def test_fork_flag_reaches_build_options(tmp_path: Path, monkeypatch) -> None:
+    bundle = _bundle()
+    captured = {}
+
+    def fake_build(options):
+        captured["options"] = options
+        return bundle
+
+    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    result = CliRunner().invoke(
+        main, ["run", "-c", "--fork", "hi"], env=_env(tmp_path)
+    )
+    assert result.exit_code == 0
+    assert captured["options"].fork is True
+    assert captured["options"].resume_id == "latest"
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -377,11 +422,12 @@ def test_max_turns_rejects_non_positive(tmp_path: Path, args: list[str]) -> None
 def test_max_turns_normal_values_pass(
     tmp_path: Path, monkeypatch, args: list[str], expected: int
 ) -> None:
+    bundle = _bundle()
     captured = {}
 
     def fake_build(options):
         captured["options"] = options
-        return _bundle()
+        return bundle
 
     monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
     result = CliRunner().invoke(main, args, env=_env(tmp_path))

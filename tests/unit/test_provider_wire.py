@@ -332,3 +332,96 @@ def test_reasoning_without_signature_is_omitted() -> None:
     message = assistant_message([ReasoningBlock("think", {})])
     wire = _messages_to_wire((message,), _profile(replay_reasoning=True))
     assert all(item["type"] != "thinking" for item in wire[0]["content"])
+
+
+async def test_prompt_caching_marks_stable_prefix_and_tools() -> None:
+    final = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="ok")],
+        stop_reason="end_turn",
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+    )
+    client = _FakeClient(_FakeStream([], final))
+    provider = AnthropicCompatProvider(api_key="test", client=client)
+    tool = ToolSpec(
+        name="Read",
+        description="Read",
+        input_schema={"type": "object", "properties": {}},
+    )
+    request = ModelRequest(
+        model="mock-1",
+        system=(
+            SystemSection("identity", "stable instructions", cacheable=True),
+            SystemSection("memory", "dynamic memory"),
+        ),
+        messages=(Message("u1", "user", (TextBlock("hi"),), now_iso()),),
+        tools=(tool,),
+        max_output_tokens=100,
+        profile=_profile(prompt_caching=True),
+    )
+    [event async for event in provider.stream(request)]
+    assert client.messages.params["system"] == [
+        {
+            "type": "text",
+            "text": "stable instructions",
+            "cache_control": {"type": "ephemeral"},
+        },
+        {"type": "text", "text": "dynamic memory"},
+    ]
+    assert client.messages.params["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_prompt_caching_is_opt_in() -> None:
+    final = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="ok")],
+        stop_reason="end_turn",
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+    )
+    client = _FakeClient(_FakeStream([], final))
+    provider = AnthropicCompatProvider(api_key="test", client=client)
+    tool = ToolSpec(
+        name="Read",
+        description="Read",
+        input_schema={"type": "object", "properties": {}},
+    )
+    request = ModelRequest(
+        model="mock-1",
+        system=(
+            SystemSection("identity", "stable instructions", cacheable=True),
+            SystemSection("memory", "dynamic memory"),
+        ),
+        messages=(Message("u1", "user", (TextBlock("hi"),), now_iso()),),
+        tools=(tool,),
+        max_output_tokens=100,
+        profile=_profile(),
+    )
+    [event async for event in provider.stream(request)]
+    assert client.messages.params["system"] == "stable instructions\n\ndynamic memory"
+    assert "cache_control" not in client.messages.params["tools"][0]
+
+
+def test_image_is_forwarded_when_supported() -> None:
+    message = Message(
+        id="m1",
+        role="user",
+        content=(ImageBlock("image/png", "abc"),),
+        created_at=now_iso(),
+    )
+    wire = _messages_to_wire((message,), _profile(supports_images=True))
+    assert wire[0]["content"] == [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+        }
+    ]
+
+
+def test_tool_result_image_is_forwarded_when_supported() -> None:
+    message = Message(
+        id="m1",
+        role="user",
+        content=(ToolResultBlock("t1", (ImageBlock("image/png", "abc"),)),),
+        created_at=now_iso(),
+    )
+    wire = _messages_to_wire((message,), _profile(supports_images=True))
+    assert wire[0]["content"][0]["content"][0]["type"] == "image"
+    assert wire[0]["content"][0]["is_error"] is False

@@ -8,7 +8,7 @@ messages for the runtime.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, cast
 
 import anthropic
@@ -36,11 +36,14 @@ from .base import (
     ProviderEvent,
     ReasoningDelta,
     ResponseCompleted,
+    SystemSection,
     TextDelta,
     ToolCall,
 )
 
 logger = logging.getLogger(__name__)
+
+_CACHE_CONTROL = {"type": "ephemeral"}
 
 
 def _stop_reason(raw: str | None) -> tuple[StopReason, str | None]:
@@ -105,11 +108,16 @@ class AnthropicCompatProvider:
             "max_tokens": request.max_output_tokens,
             "messages": _messages_to_wire(request.messages, request.profile),
         }
-        system = "\n\n".join(section.text for section in request.system if section.text)
+        system = _system_param(
+            request.system, prompt_caching=bool(getattr(request.profile, "prompt_caching", False))
+        )
         if system:
             params["system"] = system
         if request.tools:
-            params["tools"] = [_tool_to_wire(tool) for tool in request.tools]
+            params["tools"] = _tools_to_wire(
+                request.tools,
+                prompt_caching=bool(getattr(request.profile, "prompt_caching", False)),
+            )
         if request.thinking is not None:
             # Extended thinking and temperature are mutually exclusive.
             params["thinking"] = {
@@ -279,6 +287,41 @@ def _result_content_to_wire(
             },
         }
     return {"type": "text", "text": IMAGE_UNSUPPORTED_NOTE}
+
+
+def _system_param(
+    sections: Sequence[SystemSection], *, prompt_caching: bool
+) -> str | list[dict[str, Any]] | None:
+    """Build the wire ``system`` value.
+
+    Caching is prefix based, so one breakpoint at the end of the stable
+    (cacheable) prefix covers identity, workspace, tools, and policy sections.
+    """
+    texts = [section for section in sections if section.text]
+    if not texts:
+        return None
+    last_cacheable = max(
+        (index for index, section in enumerate(texts) if section.cacheable), default=None
+    )
+    if not prompt_caching or last_cacheable is None:
+        return "\n\n".join(section.text for section in texts)
+
+    blocks: list[dict[str, Any]] = []
+    for index, section in enumerate(texts):
+        block: dict[str, Any] = {"type": "text", "text": section.text}
+        if index == last_cacheable:
+            block["cache_control"] = dict(_CACHE_CONTROL)
+        blocks.append(block)
+    return blocks
+
+
+def _tools_to_wire(tools: Sequence[Any], *, prompt_caching: bool) -> list[dict[str, Any]]:
+    wire = [_tool_to_wire(tool) for tool in tools]
+    if prompt_caching and wire:
+        # Tools are rendered before the system prompt, so caching them too keeps
+        # the whole static prefix warm.
+        wire[-1] = {**wire[-1], "cache_control": dict(_CACHE_CONTROL)}
+    return wire
 
 
 def _tool_to_wire(tool: Any) -> dict[str, Any]:

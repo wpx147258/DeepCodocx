@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import AppConfig, load_config
-from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
+from .context.memory import MemoryStore
 from .context.pipeline import (
     MIN_HELPER_OUTPUT_TOKENS,
     ContextCheckpoint,
@@ -42,6 +42,7 @@ from .providers.base import (
 )
 from .providers.factory import build_provider
 from .runtime import AgentRuntime, ProviderSlot, RuntimeDeps
+from .session.fork import fork_session
 from .session.paths import latest_session_id
 from .session.store import SessionStore
 from .tools.base import ToolContext
@@ -67,8 +68,8 @@ async def _complete_request(
 ) -> str:
     """Run a tool-free helper request, retrying retryable provider failures.
 
-    Summaries and memory extraction are best-effort background work. They do not
-    share the main loop's recovery state, so a small local retry is enough.
+    Summaries are best-effort background work. They do not share the main loop's
+    recovery state, so a small local retry is enough.
     """
     last: ProviderFailure | None = None
     for attempt in range(max_attempts):
@@ -149,6 +150,7 @@ class BuildOptions:
     model: str | None = None
     permission_mode: str | None = None
     resume_id: str | None = None
+    fork: bool = False
     persist: bool = True
     max_turns: int | None = None
     memory_enabled: bool | None = None
@@ -168,6 +170,7 @@ class RuntimeBundle:
     session_id: str
     resumed: bool = False
     degraded: bool = False
+    forked_from: str | None = None
 
 
 def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
@@ -186,9 +189,14 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     )
 
     resumed = options.resume_id is not None
+    if options.fork and not resumed:
+        raise ConfigError("--fork requires --resume/-c")
+    forked_from: str | None = None
     store: SessionStore | None = None
     checkpoint: ContextCheckpoint | None = None
     initial_usage = Usage()
+    initial_mode: str | None = None
+    initial_auto_previous: str | None = None
     degraded = False
     transcript = Transcript()
 
@@ -199,6 +207,11 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             if latest is None:
                 raise ConfigError("no saved sessions are available to resume")
             session_id = latest
+        if options.fork:
+            # Fork first, then open the copy: the source may be open in another
+            # process and is never touched.
+            forked_from = session_id
+            session_id = fork_session(config.paths, session_id)
         store, loaded = SessionStore.resume(
             config.paths, session_id, persist=options.persist
         )
@@ -218,6 +231,11 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             model_name = loaded.model or config.default_model
         if loaded.checkpoint:
             checkpoint = ContextCheckpoint.from_dict(loaded.checkpoint)
+        # The session's recorded mode beats the config default, but an explicit
+        # --permission-mode wins over both.
+        if options.permission_mode is None:
+            initial_mode = loaded.permission_mode
+            initial_auto_previous = loaded.auto_previous
     else:
         provider_name = config.default_provider
         model_name = config.default_model
@@ -262,7 +280,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         config.paths.project_skills_dir,
     )
     memory_store = MemoryStore(config.paths.memory_dir) if memory_enabled else None
-    registry = build_builtin_registry(skill_loader)
+    registry = build_builtin_registry(skill_loader, memory=memory_store)
     rules = PermissionRules(
         allow=tuple(
             PermissionRule(rule.tool, dict(rule.args)) for rule in config.allow_rules
@@ -276,7 +294,8 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         rules=rules,
         workspace=config.paths.cwd,
     )
-    executor = ToolExecutor(registry)
+    spill = SpillStore(store.spills_dir)
+    executor = ToolExecutor(registry, spill=spill)
     tool_context = ToolContext(
         cwd=config.paths.cwd,
         session_id=store.session_id,
@@ -284,7 +303,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         supports_images=profile.supports_images,
     )
     estimator = TokenEstimator()
-    spill = SpillStore(store.spills_dir)
 
     complete = _make_completer(slot)
 
@@ -294,7 +312,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
 
     pipeline = ContextPipeline(
         estimator=estimator,
-        spill=spill,
         session_paths=store.paths,
         summarize=summarize,
         checkpoint=checkpoint,
@@ -303,18 +320,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     project_instructions = load_project_instructions(
         config.paths.cwd, config.paths.global_agents_md
     )
-
-    extractor: MemoryExtractor | None = None
-    coordinator: ExtractionCoordinator | None = None
-    if memory_store is not None:
-        async def extract_complete(prompt: str) -> str:
-            return await complete(prompt, 2_000)
-
-        extractor = MemoryExtractor(memory_store, extract_complete)
-        coordinator = ExtractionCoordinator(
-            min_new_messages=config.memory_extraction_min_new_messages,
-            cooldown_seconds=config.memory_extraction_cooldown_seconds,
-        )
 
     def provider_factory(
         provider_name: str, model: str
@@ -348,14 +353,12 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         initial_usage=initial_usage,
         max_turns=config.max_turns,
         memory=memory_store,
-        memory_enabled=memory_enabled,
-        extraction=coordinator,
-        extractor=extractor,
         provider_factory=provider_factory,
         thinking=thinking,
         provider_slot=slot,
     )
     runtime = AgentRuntime(deps)
+    runtime.restore_permission(initial_mode, initial_auto_previous)
     return RuntimeBundle(
         runtime=runtime,
         config=config,
@@ -363,6 +366,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         session_id=store.session_id,
         resumed=resumed,
         degraded=degraded,
+        forked_from=forked_from,
     )
 
 

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from cli_agent.context.memory import MemoryStore
 from cli_agent.context.pipeline import ContextPipeline
 from cli_agent.context.prompts import PromptBuilder
 from cli_agent.context.skills import SkillLoader
@@ -92,15 +93,17 @@ def make_runtime(
     checkpoint: Any = None,
     thinking: ThinkingConfig | None = None,
     profile: ModelProfile | None = None,
+    estimator: TokenEstimator | None = None,
+    memory: MemoryStore | None = None,
 ) -> tuple[AgentRuntime, SessionStore]:
     registry = ToolRegistry()
     for tool in tools or [EchoTool()]:
         registry.register(tool)
-    executor = ToolExecutor(registry)
+    root = tmp_path / "session"
+    executor = ToolExecutor(registry, spill=SpillStore(root / "spills"))
     permissions = policy or PermissionPolicy(
         PermissionMode.BYPASS, workspace=tmp_path
     )
-    root = tmp_path / "session"
     paths = SessionPaths(
         root=root,
         jsonl=root / "session.jsonl",
@@ -111,10 +114,9 @@ def make_runtime(
         archive=root / "archive",
     )
     session = SessionStore(paths, persist=False)
-    estimator = TokenEstimator()
+    estimator = estimator or TokenEstimator()
     pipeline = ContextPipeline(
         estimator=estimator,
-        spill=SpillStore(root / "spills"),
         session_paths=paths,
         summarize=fake_summarize,
         checkpoint=checkpoint,
@@ -148,8 +150,7 @@ def make_runtime(
         estimator=estimator,
         initial_usage=Usage(),
         max_turns=max_turns,
-        memory=None,
-        memory_enabled=False,
+        memory=memory,
         thinking=thinking,
     )
     return AgentRuntime(deps), session

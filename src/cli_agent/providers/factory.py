@@ -102,6 +102,11 @@ def build_profile(
             if override and override.replay_reasoning is not None
             else provider_config.replay_reasoning
         ),
+        prompt_caching=(
+            override.prompt_caching
+            if override and override.prompt_caching is not None
+            else provider_config.prompt_caching
+        ),
     )
     if profile.max_output_tokens < 1:
         raise ConfigError(

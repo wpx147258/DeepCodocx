@@ -51,8 +51,12 @@ async def test_switch_model_updates_shared_slot(tmp_path: Path) -> None:
     assert runtime._deps.provider_slot is not None
     assert runtime._deps.provider_slot.provider is new
     assert runtime.provider_name == "mock2"
-    assert old.closed
+    # The old provider is retired, not closed: a background summary may still
+    # be holding it.
+    assert not old.closed
     await runtime.close()
+    assert old.closed
+
 
 
 async def _consume(runtime, text: str) -> None:

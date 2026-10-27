@@ -52,9 +52,18 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
         model=bundle.profile.model,
         provider=bundle.profile.provider_name,
         session_id=bundle.session_id,
+        permission_mode=runtime.permission_mode,
     )
+    forked_from = getattr(bundle, "forked_from", None)
+    if forked_from:
+        renderer.notice(f"Forked from session {forked_from}.")
     if bundle.degraded:
         renderer.notice("The resumed session had corrupt records; some were skipped.")
+    if bundle.resumed:
+        if runtime.messages:
+            renderer.history(runtime.messages)
+        else:
+            renderer.notice("Resumed an empty session.")
 
     while True:
         try:
@@ -89,8 +98,6 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
         except Exception as exc:  # noqa: BLE001 - keep the REPL alive
             renderer.error(f"{type(exc).__name__}: {exc}")
 
-    if runtime.has_pending_extraction:
-        renderer.notice("Finishing memory extraction...")
     await runtime.close()
     return 0
 
@@ -125,6 +132,14 @@ async def run_print(
             resumed=bundle.resumed,
         )
 
+    forked_from = getattr(bundle, "forked_from", None)
+    if forked_from and output_format == "text":
+        import sys
+
+        print(
+            f"forked session {bundle.session_id} from {forked_from}",
+            file=sys.stderr,
+        )
     renderer.start()
     try:
         async for event in bundle.runtime.run_turn(prompt):

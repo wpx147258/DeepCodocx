@@ -16,6 +16,21 @@ class AgentTextDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentRetry:
+    """A failed provider attempt is being retried.
+
+    ``partial`` means text had already been streamed to the host, so whatever is
+    displayed next repeats the abandoned attempt rather than continuing it.
+    """
+
+    attempt: int
+    max_attempts: int
+    kind: str
+    reason: str
+    partial: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class AgentToolStarted:
     tool_use_id: str
     name: str
@@ -62,6 +77,7 @@ class AgentTurnFinished:
 
 type AgentEvent = (
     AgentTextDelta
+    | AgentRetry
     | AgentToolStarted
     | AgentToolFinished
     | AgentUsage

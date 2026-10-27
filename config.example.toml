@@ -10,9 +10,13 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key_env = ["DEEPSEEK_API_KEY"]
 default_model = "deepseek-flash[1M]"
 context_window = 880000
-max_output_tokens = 256000
+max_output_tokens = 128000
 supports_thinking = true
 thinking_by_default = true
+supports_images = true
+# Emit cache_control breakpoints for the static system prefix and tool schemas.
+# Off for third-party endpoints by default; enable only if the host accepts it.
+# prompt_caching = true
 
 [thinking]
 # Leave enabled unset to use the provider default (DeepSeek: on).
@@ -20,6 +24,6 @@ thinking_by_default = true
 budget_tokens = 100000  # must be below max_output_tokens
 
 [memory]
+# The agent writes memory itself through the Remember tool; there is no
+# background extraction loop.
 enabled = true
-extraction_min_new_messages = 8   # require at least this many new visible messages
-extraction_cooldown_seconds = 60  # minimum gap between extraction attempts

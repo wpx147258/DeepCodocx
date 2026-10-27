@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from cli_agent.context.tokens import TokenEstimator
 from cli_agent.events import (
     AgentError,
     AgentNotice,
+    AgentRetry,
     AgentTextDelta,
     AgentToolFinished,
     AgentToolStarted,
@@ -13,7 +19,13 @@ from cli_agent.events import (
 )
 from cli_agent.messages import Usage
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
-from cli_agent.providers.base import ProviderError, ReasoningDelta, TextDelta, ToolCall
+from cli_agent.providers.base import (
+    ProviderError,
+    ReasoningDelta,
+    TextDelta,
+    ToolCall,
+)
+from cli_agent.tools.base import ToolContext, ToolResult, ToolSpec
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
 
@@ -167,6 +179,33 @@ async def test_fatal_error_is_reported(tmp_path: Path) -> None:
     await runtime.close()
 
 
+async def test_refusal_is_not_reported_as_end_turn(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("I can't help with that.", stop_reason="refusal")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("do the thing")]
+    finished = events[-1]
+    assert isinstance(finished, AgentTurnFinished)
+    assert finished.stop_reason == "refusal"
+    await runtime.close()
+
+
+async def test_retryable_error_emits_a_retry_notice(tmp_path: Path, monkeypatch) -> None:
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    provider = FakeProvider([[fail("rate limited", "retryable")], [text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    notices = [event for event in events if isinstance(event, AgentRetry)]
+    assert len(notices) == 1
+    assert notices[0].attempt == 1
+    assert notices[0].max_attempts == 3
+    assert notices[0].reason == "rate limited"
+    assert notices[0].partial is False
+    await runtime.close()
+
+
 async def test_clear_resets_transcript_and_usage(tmp_path: Path) -> None:
     provider = FakeProvider([[text_response("hello")]])
     runtime, _ = make_runtime(provider, tmp_path=tmp_path)
@@ -184,6 +223,31 @@ async def _consume(runtime, text: str) -> None:
         pass
 
 
+async def test_high_risk_shell_command_is_blocked_without_an_asker(tmp_path: Path) -> None:
+    shell = ShellTool()
+    policy = PermissionPolicy(PermissionMode.BYPASS, workspace=tmp_path)
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Bash", {"command": "rm -rf /"})])],
+            [text_response("giving up")],
+        ]
+    )
+    runtime, _ = make_runtime(
+        provider,
+        tmp_path=tmp_path,
+        tools=[shell],
+        policy=policy,
+        asker=NullAsker(),
+    )
+    await _consume(runtime, "clean the disk")
+
+    assert shell.calls == []
+    result = runtime.messages[2].tool_results()[0]
+    assert result.is_error
+    assert "high-risk" in result.content[0].text
+    await runtime.close()
+
+
 async def test_request_carries_thinking_config(tmp_path: Path) -> None:
     from cli_agent.providers.base import ThinkingConfig
 
@@ -194,6 +258,314 @@ async def test_request_carries_thinking_config(tmp_path: Path) -> None:
     await _consume(runtime, "go")
     assert provider.requests[0].thinking == ThinkingConfig(2_048)
     assert runtime.thinking == ThinkingConfig(2_048)
+    await runtime.close()
+
+
+class _BarrierReadTool:
+    """Only completes if two calls are in flight at the same time."""
+
+    spec = ToolSpec(
+        name="Read",
+        description="Read a file.",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        category="read",
+        concurrency_safe=True,
+    )
+
+    def __init__(self, barrier: asyncio.Barrier) -> None:
+        self.barrier = barrier
+        self.paths: list[str] = []
+
+    async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        self.paths.append(str(args["path"]))
+        await asyncio.wait_for(self.barrier.wait(), timeout=5)
+        return ToolResult.text(f"read {args['path']}")
+
+
+class _RecordingTool:
+    def __init__(self, name: str, log: list[str], *, safe: bool, category: str) -> None:
+        self.log = log
+        self.spec = ToolSpec(
+            name=name,
+            description=name,
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            category=category,  # type: ignore[arg-type]
+            concurrency_safe=safe,
+        )
+
+    async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        self.log.append(self.spec.name)
+        await asyncio.sleep(0)
+        return ToolResult.text(self.spec.name)
+
+
+async def test_concurrency_safe_calls_run_in_parallel(tmp_path: Path) -> None:
+    tool = _BarrierReadTool(asyncio.Barrier(2))
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Read", {"path": "a"}), ("t2", "Read", {"path": "b"})])],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[tool])
+    events = [event async for event in runtime.run_turn("go")]
+    finished = [event for event in events if isinstance(event, AgentToolFinished)]
+    # Results keep the model's call order even though the runs overlap.
+    assert [event.tool_use_id for event in finished] == ["t1", "t2"]
+    assert not any(event.is_error for event in finished)
+    assert tool.paths == ["a", "b"]
+    await runtime.close()
+
+
+async def test_unsafe_calls_act_as_parallel_barriers(tmp_path: Path) -> None:
+    log: list[str] = []
+    read = _RecordingTool("Read", log, safe=True, category="read")
+    write = _RecordingTool("Write", log, safe=False, category="write")
+    provider = FakeProvider(
+        [
+            [
+                tool_response(
+                    [
+                        ("t1", "Read", {}),
+                        ("t2", "Write", {}),
+                        ("t3", "Read", {}),
+                    ]
+                )
+            ],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[read, write])
+    await _consume(runtime, "go")
+    assert log == ["Read", "Write", "Read"]
+    await runtime.close()
+
+
+async def test_cancelling_parallel_tools_records_cancelled_results(tmp_path: Path) -> None:
+    started = asyncio.Event()
+
+    class _BlockingTool:
+        spec = ToolSpec(
+            name="Read",
+            description="Read a file.",
+            input_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            category="read",
+            concurrency_safe=True,
+        )
+
+        async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+            started.set()
+            await asyncio.Event().wait()
+            return ToolResult.text("never")
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Read", {"path": "a"}), ("t2", "Read", {"path": "b"})])],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[_BlockingTool()])
+
+    async def consume() -> None:
+        async for _ in runtime.run_turn("go"):
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    results = runtime.messages[-1].tool_results()
+    assert {result.tool_use_id for result in results} == {"t1", "t2"}
+    assert all(result.is_error for result in results)
+    assert "cancelled" in results[0].content[0].text.lower()
+    await runtime.close()
+
+
+async def test_calibration_counts_cached_prompt_tokens(tmp_path: Path) -> None:
+    estimator = TokenEstimator()
+    provider = FakeProvider(
+        [
+            [
+                text_response(
+                    "ok",
+                    usage=Usage(
+                        input_tokens=10,
+                        output_tokens=5,
+                        cache_read_tokens=10_000,
+                    ),
+                )
+            ]
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, estimator=estimator)
+    await _consume(runtime, "go")
+    # The prompt was ~10k tokens with most of it cached. Counting only the
+    # uncached input would drive the factor down toward the 0.5 clamp.
+    assert estimator.factor > 1.0
+    await runtime.close()
+
+
+async def test_context_tokens_tracks_the_last_request(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    assert runtime.context_tokens == 0
+    await _consume(runtime, "hello")
+    assert runtime.context_tokens > 0
+    assert runtime.context_window == 200_000
+    await runtime.clear()
+    assert runtime.context_tokens == 0
+    await runtime.close()
+
+
+async def test_memory_rides_on_the_user_message_not_the_system_prompt(
+    tmp_path: Path,
+) -> None:
+    from cli_agent.context.memory import MemoryRecord, MemoryStore
+
+    store = MemoryStore(tmp_path / "memory")
+    store.save(MemoryRecord("prefers-tabs", "indent", "user", "Use tabs."))
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, memory=store)
+    await _consume(runtime, "tabs preference")
+
+    request = provider.requests[0]
+    system_text = "\n".join(section.text for section in request.system)
+    assert "Memory catalog" not in system_text
+    assert "call Remember" in system_text
+
+    last_user = [message for message in request.messages if message.role == "user"][-1]
+    assert "[Memory]" in last_user.text()
+    assert "Use tabs." in last_user.text()
+    # The stored transcript keeps the original message only.
+    assert "[Memory]" not in runtime.messages[0].text()
+    await runtime.close()
+
+
+async def test_memory_note_is_absent_without_records(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryStore
+
+    provider = FakeProvider([[text_response("ok")]])
+    runtime, _ = make_runtime(
+        provider, tmp_path=tmp_path, memory=MemoryStore(tmp_path / "memory")
+    )
+    await _consume(runtime, "hello")
+    last_user = [m for m in provider.requests[0].messages if m.role == "user"][-1]
+    assert "[Memory]" not in last_user.text()
+    await runtime.close()
+
+
+async def test_saving_memory_leaves_the_system_prompt_unchanged(tmp_path: Path) -> None:
+    from cli_agent.context.memory import MemoryStore
+    from cli_agent.tools.builtin.memory import RememberTool
+
+    store = MemoryStore(tmp_path / "memory")
+    provider = FakeProvider(
+        [
+            [
+                tool_response(
+                    [
+                        (
+                            "t1",
+                            "Remember",
+                            {
+                                "name": "prefers-tabs",
+                                "type": "user",
+                                "content": "Use tabs.",
+                            },
+                        )
+                    ]
+                )
+            ],
+            [text_response("saved")],
+            [text_response("onward")],
+        ]
+    )
+    runtime, _ = make_runtime(
+        provider,
+        tmp_path=tmp_path,
+        tools=[RememberTool(store)],
+        memory=store,
+    )
+    await _consume(runtime, "remember that I use tabs")
+    await _consume(runtime, "next question")
+
+    first = "\n".join(section.text for section in provider.requests[0].system)
+    third = "\n".join(section.text for section in provider.requests[2].system)
+    # The cached prefix must survive a memory write.
+    assert first == third
+    assert "prefers-tabs" not in first
+
+    last_user = [m for m in provider.requests[2].messages if m.role == "user"][-1]
+    assert "prefers-tabs" in last_user.text()
+    assert "Use tabs." in last_user.text()
+    await runtime.close()
+
+
+def _request_signature(messages):
+    import json
+
+    from cli_agent.messages import TextBlock, ToolResultBlock, ToolUseBlock
+
+    signature = []
+    for message in messages:
+        blocks = []
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                blocks.append(("text", block.text))
+            elif isinstance(block, ToolUseBlock):
+                blocks.append(
+                    (
+                        "tool",
+                        block.id,
+                        block.name,
+                        json.dumps(dict(block.input), sort_keys=True),
+                    )
+                )
+            elif isinstance(block, ToolResultBlock):
+                blocks.append(
+                    (
+                        "result",
+                        block.tool_use_id,
+                        tuple(item.text for item in block.content),
+                    )
+                )
+        signature.append((message.role, tuple(blocks)))
+    return signature
+
+
+async def test_requests_append_without_rewriting_the_prefix(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            [text_response("first answer")],
+            [tool_response([("t1", "Echo", {"text": "hi"})])],
+            [text_response("done")],
+            [text_response("third answer")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    await _consume(runtime, "one")
+    await _consume(runtime, "two")
+    await _consume(runtime, "three")
+
+    systems = ["\n\n".join(section.text for section in r.system) for r in provider.requests]
+    assert len(set(systems)) == 1
+
+    signatures = [_request_signature(r.messages) for r in provider.requests]
+    for earlier, later in zip(signatures, signatures[1:], strict=False):
+        # Every request must extend the previous one byte for byte; a rewrite
+        # here would invalidate the provider's cached prefix.
+        assert later[: len(earlier)] == earlier
     await runtime.close()
 
 
@@ -231,6 +603,7 @@ async def test_max_tokens_exhaustion_is_reported(tmp_path: Path) -> None:
     assert isinstance(events[-1], AgentTurnFinished)
     assert events[-1].stop_reason == "max_tokens"
     assert len(provider.requests) == 3
+
     await runtime.close()
 
 

@@ -9,23 +9,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field, replace
 
-from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
+from .context.memory import MemoryRecord, MemoryStore, inject_memory, memory_note
 from .context.pipeline import ContextPipeline
 from .context.prompts import PromptBuilder, PromptContext
 from .context.skills import SkillLoader
-from .context.tokens import TokenEstimator
+from .context.tokens import TokenEstimator, prompt_tokens
 from .errors import ConfigError, ProviderFailure
 from .events import (
     AgentContextEvent,
     AgentError,
     AgentEvent,
     AgentNotice,
-    AgentTextDelta,
+    AgentRetry,
     AgentToolFinished,
-    AgentToolStarted,
     AgentTurnFinished,
     AgentUsage,
 )
@@ -34,22 +33,20 @@ from .messages import (
     StopReason,
     TextBlock,
     ToolResultBlock,
+    ToolUseBlock,
     Usage,
     tool_result_message,
     user_message,
 )
+from .permissions.controller import PermissionController
 from .permissions.policy import Asker, PermissionPolicy
 from .providers.base import (
     ModelProfile,
     ModelRequest,
     Provider,
-    ProviderError,
-    ReasoningDelta,
-    ResponseCompleted,
-    TextDelta,
     ThinkingConfig,
-    ToolCall,
 )
+from .runtime_attempt import Attempt, stream_attempt
 from .session.store import SessionStore
 from .tools.base import ToolContext, ToolResult
 from .tools.execution import ToolExecutor
@@ -104,9 +101,6 @@ class RuntimeDeps:
     initial_usage: Usage = field(default_factory=Usage)
     max_turns: int = 50
     memory: MemoryStore | None = None
-    memory_enabled: bool = True
-    extraction: ExtractionCoordinator | None = None
-    extractor: MemoryExtractor | None = None
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
     provider_slot: ProviderSlot | None = None
@@ -129,7 +123,17 @@ class AgentRuntime:
             )
         self._usage = deps.initial_usage
         self._active_request = ""
-        self._extraction_task: asyncio.Task[None] | None = None
+        self._last_request_tokens = 0
+        self._last_usage = Usage()
+        # Providers replaced by /model. They stay open until shutdown because a
+        # background summary call may still hold one.
+        self._retired: list[Provider] = []
+        self._permissions = PermissionController(
+            deps.policy,
+            on_change=lambda mode, previous: deps.session.append_permission_mode(
+                mode, previous
+            ),
+        )
 
     # ------------------------------------------------------------------
     # public surface
@@ -152,12 +156,48 @@ class AgentRuntime:
         return self._deps.profile.provider_name
 
     @property
-    def has_pending_extraction(self) -> bool:
-        return self._extraction_task is not None and not self._extraction_task.done()
-
-    @property
     def thinking(self) -> ThinkingConfig | None:
         return self._deps.thinking
+
+    @property
+    def context_tokens(self) -> int:
+        """Estimated size of the last request (messages + system + tools)."""
+        return self._last_request_tokens
+
+    @property
+    def context_window(self) -> int:
+        return self._deps.profile.context_window
+
+    @property
+    def last_usage(self) -> Usage:
+        """Usage reported for the most recent provider request."""
+        return self._last_usage
+
+    @property
+    def permission_mode(self) -> str:
+        return self._permissions.mode
+
+    def set_permission_mode(self, mode: str, *, persist: bool = True) -> str:
+        return self._permissions.set_mode(mode, persist=persist)
+
+    def set_auto(self, enabled: bool, *, persist: bool = True) -> str:
+        return self._permissions.set_auto(enabled, persist=persist)
+
+    def toggle_auto(self, *, persist: bool = True) -> str:
+        return self._permissions.toggle_auto(persist=persist)
+
+    def restore_permission(self, mode: str | None, auto_previous: str | None = None) -> None:
+        self._permissions.restore(mode, auto_previous)
+
+    def memories(self) -> tuple[MemoryRecord, ...]:
+        if self._deps.memory is None:
+            return ()
+        return tuple(self._deps.memory.all())
+
+    def forget_memory(self, name: str) -> bool:
+        if self._deps.memory is None:
+            return False
+        return self._deps.memory.forget(name)
 
     async def run_turn(self, text: str | None = None) -> AsyncIterator[AgentEvent]:
         if text is not None:
@@ -193,69 +233,23 @@ class AgentRuntime:
             recovery.reactive_requested = False
             if prepared.checkpoint is not None:
                 self._deps.session.save_context(prepared.checkpoint.to_dict())
-            for event in prepared.events:
-                yield AgentContextEvent(event.kind, event.detail)
+            for context_event in prepared.events:
+                yield AgentContextEvent(context_event.kind, context_event.detail)
 
-            request = ModelRequest(
-                model=self._deps.profile.model,
-                system=self._deps.prompt_builder.build(self._prompt_context()),
-                messages=prepared.messages,
-                tools=self._deps.registry.specs(),
-                max_output_tokens=self._deps.profile.max_output_tokens,
-                profile=self._deps.profile,
-                thinking=self._deps.thinking,
-            )
-            estimated = self._deps.estimator.estimate_messages(prepared.messages)
+            request, estimated = self._build_request(prepared.messages)
+            self._last_request_tokens = estimated
 
-            assistant: Message | None = None
-            stop_reason: StopReason = "end_turn"
-            parse_errors: dict[str, str] = {}
-            emitted_text = False
-            emitted_partial = False
+            attempt = Attempt()
             try:
-                async for provider_event in self._deps.provider.stream(request):
-                    if isinstance(provider_event, TextDelta):
-                        if provider_event.text:
-                            emitted_text = True
-                            emitted_partial = True
-                            yield AgentTextDelta(provider_event.text)
-                    elif isinstance(provider_event, ReasoningDelta):
-                        if provider_event.text:
-                            emitted_partial = True
-                            yield AgentTextDelta(provider_event.text, reasoning=True)
-                    elif isinstance(provider_event, ToolCall):
-                        emitted_partial = True
-                        if provider_event.parse_error:
-                            parse_errors[provider_event.tool_use_id] = provider_event.parse_error
-                        yield AgentToolStarted(
-                            provider_event.tool_use_id,
-                            provider_event.name,
-                            provider_event.input,
-                        )
-                    elif isinstance(provider_event, ProviderError):
-                        raise ProviderFailure(
-                            provider_event.message,
-                            provider_event.kind,
-                            provider_event.status_code,
-                        )
-                    elif isinstance(provider_event, ResponseCompleted):
-                        assistant = provider_event.message
-                        if not emitted_text and assistant.text():
-                            emitted_partial = True
-                            yield AgentTextDelta(assistant.text())
-                        self._append(assistant)
-                        stop_reason = provider_event.stop_reason
-                        self._usage = self._usage + provider_event.usage
-                        self._deps.session.append_usage(
-                            provider_event.usage, self._deps.profile.model
-                        )
-                        self._deps.estimator.calibrate(
-                            estimated, provider_event.usage.input_tokens
-                        )
-                        yield AgentUsage(provider_event.usage, self._usage)
-                        break
+                async for agent_event in stream_attempt(
+                    self._deps.provider, request, attempt
+                ):
+                    yield agent_event
             except ProviderFailure as failure:
-                if emitted_partial and failure.kind in ("retryable", "context_length"):
+                if attempt.emitted_partial and failure.kind in (
+                    "retryable",
+                    "context_length",
+                ):
                     # Retrying would stream the same opening again. Stop and
                     # let the user decide whether to resend.
                     yield AgentError(
@@ -265,8 +259,16 @@ class AgentRuntime:
                     )
                     yield AgentTurnFinished("error", self._usage)
                     return
-                action = await self._recover(failure, recovery)
+                action, delay = await self._recover(failure, recovery)
                 if action == "retry":
+                    yield AgentRetry(
+                        attempt=recovery.retries,
+                        max_attempts=MAX_RETRIES,
+                        kind=failure.kind,
+                        reason=failure.message,
+                        partial=attempt.emitted_text,
+                    )
+                    await asyncio.sleep(delay)
                     turns -= 1
                     continue
                 if action == "reactive":
@@ -276,74 +278,41 @@ class AgentRuntime:
                 yield AgentTurnFinished("error", self._usage)
                 return
             except asyncio.CancelledError:
-                await self._after_turn("cancelled")
                 raise
 
-            if assistant is None:
+            if attempt.assistant is None:
                 yield AgentError("provider stream ended without a final message", "fatal")
                 yield AgentTurnFinished("error", self._usage)
                 return
 
+            self._append(attempt.assistant)
+            self._last_usage = attempt.usage
+            self._usage = self._usage + attempt.usage
+            self._deps.session.append_usage(attempt.usage, self._deps.profile.model)
+            yield AgentUsage(attempt.usage, self._usage)
+            self._deps.estimator.calibrate(estimated, prompt_tokens(attempt.usage))
             recovery.retries = 0
-            calls = assistant.tool_uses()
-            if not calls:
-                if stop_reason == "max_tokens" and recovery.continuations < MAX_CONTINUATIONS:
-                    recovery.continuations += 1
-                    self._append(user_message(CONTINUE_PROMPT))
-                    yield AgentContextEvent("continue", "max output tokens; asking for continuation")
-                    continue
 
-                if stop_reason in ("refusal", "error"):
-                    yield AgentError(
-                        f"provider stopped with {stop_reason}", stop_reason
-                    )
-                elif stop_reason == "max_tokens":
+            calls = attempt.assistant.tool_uses()
+            if not calls:
+                events, finish = self._finish_attempt(attempt, recovery)
+                for pending_event in events:
+                    yield pending_event
+                if finish is None:
+                    continue
+                if finish in ("refusal", "error"):
+                    yield AgentError(f"provider stopped with {finish}", finish)
+                elif finish == "max_tokens":
                     yield AgentNotice(
                         "Output limit reached; the response may be incomplete."
                     )
-
-                # Only a genuine end_turn may trigger memory extraction.
-                await self._after_turn(stop_reason)
-                yield AgentTurnFinished(stop_reason, self._usage)
+                yield AgentTurnFinished(finish, self._usage)
                 return
 
-            results: list[ToolResultBlock] = []
-            completed: set[str] = set()
-            # The profile can change between calls (for example via /model), so
-            # derive capability from the profile serving this request.
-            tool_context = replace(
-                self._deps.tool_context,
-                supports_images=self._deps.profile.supports_images,
-            )
-            try:
-                for call in calls:
-                    result = await self._deps.executor.execute(
-                        call,
-                        ctx=tool_context,
-                        policy=self._deps.policy,
-                        asker=self._deps.asker,
-                        parse_error=parse_errors.get(call.id),
-                    )
-                    completed.add(call.id)
-                    results.append(_to_result_block(call.id, result))
-                    yield AgentToolFinished(
-                        call.id,
-                        call.name,
-                        result.content,
-                        result.is_error,
-                    )
-            except asyncio.CancelledError:
-                for call in calls:
-                    if call.id not in completed:
-                        results.append(_cancelled_result(call.id))
-                self._append(tool_result_message(results))
-                await self._after_turn("cancelled")
-                raise
-
-            self._append(tool_result_message(results))
+            async for tool_event in self._run_tool_calls(calls, attempt.parse_errors):
+                yield tool_event
             recovery.continuations = 0
 
-        await self._after_turn("max_turns")
         yield AgentTurnFinished("max_turns", self._usage)
 
     async def compact(self) -> AsyncIterator[AgentEvent]:
@@ -370,6 +339,8 @@ class AgentRuntime:
         self._deps.context.set_checkpoint(None)
         self._usage = Usage()
         self._active_request = ""
+        self._last_request_tokens = 0
+        self._last_usage = Usage()
 
     async def switch_model(self, provider_name: str, model: str) -> None:
         if self._deps.provider_factory is None:
@@ -386,26 +357,21 @@ class AgentRuntime:
         self._deps.thinking = thinking
         if self._deps.provider_slot is not None:
             self._deps.provider_slot.replace(provider, profile, thinking)
-        try:
-            await old.aclose()
-        except Exception:  # noqa: BLE001
-            logger.debug("closing previous provider failed", exc_info=True)
+        if old is not provider:
+            # Background helpers may still be mid-call on the old provider, and
+            # summarization would otherwise keep using a closed client. Close it
+            # at shutdown instead.
+            self._retired.append(old)
         self._deps.session.append_model(profile.provider_name, profile.model)
 
     async def close(self) -> None:
-        task = self._extraction_task
-        self._extraction_task = None
-        if task is not None:
-            if not task.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=15)
-                except (TimeoutError, asyncio.CancelledError, Exception):
-                    task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        retired, self._retired = self._retired, []
         try:
             await self._deps.provider.aclose()
         finally:
+            for provider in retired:
+                with contextlib.suppress(Exception):
+                    await provider.aclose()
             self._deps.session.close()
 
     # ------------------------------------------------------------------
@@ -423,14 +389,102 @@ class AgentRuntime:
             profile=self._deps.profile,
             tools=self._deps.registry.specs(),
             skills=self._deps.skills.catalog(),
-            memory_catalog=tuple(memory.catalog_lines()) if memory else (),
-            memories=tuple(memory.select(self._active_request)) if memory else (),
             project_instructions=self._deps.project_instructions,
             active_request=self._active_request,
             compaction_active=self._deps.context.checkpoint is not None,
+            memory_enabled=memory is not None,
         )
 
-    async def _recover(self, failure: ProviderFailure, recovery: _Recovery) -> str:
+    def _build_request(self, messages: Sequence[Message]) -> tuple[ModelRequest, int]:
+        system = self._deps.prompt_builder.build(self._prompt_context())
+        tools = self._deps.registry.specs()
+        # Memory rides on the newest user message so the system prompt (and the
+        # cacheable prefix) stays stable when a record is saved.
+        view = inject_memory(
+            messages, memory_note(self._deps.memory, self._active_request)
+        )
+        request = ModelRequest(
+            model=self._deps.profile.model,
+            system=system,
+            messages=view,
+            tools=tools,
+            max_output_tokens=self._deps.profile.max_output_tokens,
+            profile=self._deps.profile,
+            thinking=self._deps.thinking,
+        )
+        # Tools and the system prompt consume real input tokens; leaving them out
+        # made the calibration ratio drift toward the clamp.
+        estimated = self._deps.estimator.estimate_request(view, system, tools)
+        return request, estimated
+
+    def _finish_attempt(
+        self, attempt: Attempt, recovery: _Recovery
+    ) -> tuple[list[AgentEvent], StopReason | None]:
+        """What a completed, tool-free attempt means: ask for more, or finish."""
+        if (
+            attempt.stop_reason == "max_tokens"
+            and recovery.continuations < MAX_CONTINUATIONS
+        ):
+            recovery.continuations += 1
+            self._append(user_message(CONTINUE_PROMPT))
+            return (
+                [AgentContextEvent("continue", "max output tokens; asking for continuation")],
+                None,
+            )
+        # A refusal or a truncated turn is not a successful end_turn, and hosts
+        # exit non-zero for it.
+        reason = attempt.stop_reason
+        final_reason: StopReason = "error" if reason == "tool_use" else reason
+        return [], final_reason
+
+    async def _run_tool_calls(
+        self, calls: Sequence[ToolUseBlock], parse_errors: dict[str, str]
+    ) -> AsyncIterator[AgentToolFinished]:
+        """Authorize every call in order, then execute in concurrency-safe batches."""
+        prepared = [
+            await self._deps.executor.prepare(
+                call,
+                policy=self._deps.policy,
+                asker=self._deps.asker,
+                parse_error=parse_errors.get(call.id),
+            )
+            for call in calls
+        ]
+        results: list[ToolResultBlock] = []
+        completed: set[str] = set()
+        # The profile can change between calls (for example via /model), so
+        # derive capability from the profile serving this request.
+        tool_context = replace(
+            self._deps.tool_context,
+            supports_images=self._deps.profile.supports_images,
+        )
+        try:
+            async for item, result in self._deps.executor.run_all(
+                prepared, ctx=tool_context
+            ):
+                completed.add(item.call.id)
+                results.append(_to_result_block(item.call.id, result))
+                yield AgentToolFinished(
+                    item.call.id,
+                    item.call.name,
+                    result.content,
+                    result.is_error,
+                )
+        except asyncio.CancelledError:
+            for call in calls:
+                if call.id not in completed:
+                    results.append(_cancelled_result(call.id))
+            self._append(tool_result_message(results))
+            raise
+
+        self._append(tool_result_message(results))
+
+    async def _recover(self, failure: ProviderFailure, recovery: _Recovery) -> tuple[str, float]:
+        """Decide what to do with a failed attempt, and how long to wait.
+
+        The caller emits the retry notice and sleeps, so the delay is part of the
+        decision rather than a side effect here.
+        """
         if failure.kind == "retryable" and recovery.retries < MAX_RETRIES:
             delay = 0.5 * (2**recovery.retries)
             recovery.retries += 1
@@ -440,37 +494,12 @@ class AgentRuntime:
                 recovery.retries,
                 MAX_RETRIES,
             )
-            await asyncio.sleep(delay)
-            return "retry"
+            return "retry", delay
         if failure.kind == "context_length" and not recovery.attempted_reactive:
             recovery.attempted_reactive = True
             recovery.reactive_requested = True
-            return "reactive"
-        return "fail"
-
-    async def _after_turn(self, stop_reason: str) -> None:
-        if stop_reason != "end_turn":
-            return
-        if (
-            not self._deps.memory_enabled
-            or self._deps.memory is None
-            or self._deps.extraction is None
-            or self._deps.extractor is None
-            or not self._deps.session.persist
-        ):
-            return
-        if self._extraction_task is not None and not self._extraction_task.done():
-            return
-        self._extraction_task = asyncio.create_task(self._extract_memory())
-
-    async def _extract_memory(self) -> None:
-        try:
-            await self._deps.extraction.request(  # type: ignore[union-attr]
-                lambda: self._deps.transcript.messages,
-                self._deps.extractor,  # type: ignore[arg-type]
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("memory extraction task failed: %s", exc)
+            return "reactive", 0.0
+        return "fail", 0.0
 
 
 def _to_result_block(tool_use_id: str, result: ToolResult) -> ToolResultBlock:

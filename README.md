@@ -11,7 +11,7 @@ compatible endpoints such as DeepSeek, Kimi, MiniMax, and GLM.
 
 ```
 user input
-  -> context pipeline (repair, spill, prune, snip, summarize)
+  -> context pipeline (repair, summarize when the budget is full)
   -> provider.stream()
   -> text deltas / tool calls
   -> tool executor (validate -> permission -> run)
@@ -51,7 +51,7 @@ base_url = "https://api.deepseek.com/anthropic"
 api_key_env = ["DEEPSEEK_API_KEY"]
 default_model = "deepseek-flash[1M]"
 context_window = 880000
-max_output_tokens = 256000
+max_output_tokens = 128000
 supports_thinking = true
 thinking_by_default = true
 
@@ -61,9 +61,8 @@ thinking_by_default = true
 budget_tokens = 100000  # must be below max_output_tokens
 
 [memory]
+# The agent writes memory through the Remember tool; no background extraction.
 enabled = true
-extraction_min_new_messages = 8   # require at least this many new visible messages
-extraction_cooldown_seconds = 60  # minimum gap between extraction attempts
 ```
 
 ## Headless output
@@ -114,6 +113,8 @@ In headless mode there is no interactive permission asker: use
 cli-agent                              # interactive REPL
 cli-agent -c                           # resume the latest REPL session
 cli-agent --resume <session-id>
+cli-agent -c --fork                    # fork the latest session into a copy
+cli-agent --resume <session-id> --fork
 cli-agent --permission-mode default
 cli-agent --provider deepseek           # REPL, defaults to deepseek-flash[1M] + thinking
 cli-agent --provider deepseek --no-extended-thinking
@@ -135,6 +136,10 @@ Common options may be placed before or after `run` (for example
 On resume, explicit `--provider`/`--model` override the saved session. If you
 change the provider without a model, the new provider's default model is used.
 
+`--fork` copies the resumed session (history, usage, checkpoint, spills) under a new
+id and continues in the copy; the original stays untouched and may even be open in
+another process. The REPL prints the session it was forked from.
+
 `--extended-thinking` is a request capability: it sends the provider's `thinking`
 parameter and requires the selected provider/model to declare `supports_thinking`.
 Providers may also default it on (`thinking_by_default`); the DeepSeek preset does,
@@ -143,7 +148,33 @@ so `cli-agent --provider deepseek` requests thinking without extra flags.
 the model think. Use a reasoning-capable model; for DeepSeek, `deepseek-flash`
 (not `deepseek-chat`) produces reasoning.
 
-Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
+`run` exits `0` only when the turn ends normally. A refusal, provider error, or
+`--max-turns` cutoff exits `2`, and the stop reason is written to stderr. Retries are
+announced too (inline in the REPL, on stderr in one-shot mode); if an attempt had already
+streamed text, the notice says that the earlier text is stale rather than silently
+splicing two partial answers together.
+
+`/cost` reports billed usage (uncached input, output, cache reads and writes), the
+estimated size of the last request against the context window, and the prefix cache
+hit rate for that request and for the session. Provider `input_tokens` excludes the
+cached prefix, so prompt size is input + cache reads + cache writes; the token
+estimator and its calibration use that sum. `/compact` warns before rewriting the
+prompt prefix, because the next request has to re-read the context.
+
+Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`, and
+`Remember` when memory is enabled.
+`Glob` skips dependency and build directories unless the pattern or `path` names one.
+Consecutive read-only calls (`concurrency_safe`) in one turn run in parallel; writes and
+shell commands stay ordered barriers, and permission prompts are always serialized.
+`/auto [on|off]` toggles full-permission mode and remembers the mode it replaced. The
+change is appended to the session, so `-c` restores it (an explicit `--permission-mode`
+still wins), and the REPL banner shows the active mode.
+
+Shell commands pass one static guard first: recursive deletes aimed at `/`, `$HOME`, a
+parent directory, the current directory, or a system directory always need a fresh
+interactive approval — bypass and `/auto` do not skip it, and "always" is never
+remembered for them. It is approval UX, not a sandbox: `sh -c`, `xargs`, and scripts are
+out of scope, and an explicit `permissions.allow` rule still wins.
 
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from
@@ -166,7 +197,11 @@ the global config `AGENTS.md` are restricted to the config directory.
 The prompt is assembled from ordered modules under `src/cli_agent/context/prompts/`:
 identity, workspace, tools, file/shell policies, project instructions, memory, skills,
 and compaction. The tool list is generated from the live registry, and modules only
-claim capabilities the harness actually implements.
+claim capabilities the harness actually implements. Modules marked `cacheable` form the
+static prefix; when the provider profile sets `prompt_caching = true` (the `anthropic`
+preset does) the adapter emits `cache_control` breakpoints for that prefix and the tool
+schemas. Third-party Anthropic-compatible endpoints stay off by default because they may
+reject the field.
 
 ## Status (v1)
 
@@ -177,34 +212,48 @@ Implemented today:
 - explicit provider abstraction plus the Anthropic-compatible adapter
   (Anthropic, DeepSeek, Kimi, MiniMax, GLM presets);
 - `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`;
+- image input: `Read` returns image blocks for png/jpeg/gif/webp, and presets
+  declaring `supports_images` (`anthropic`, `deepseek`) forward them; other profiles
+  receive a text placeholder instead;
+- ordered tool execution inside the one loop: permission checks stay serialized, and
+  consecutive `concurrency_safe` reads run in parallel while writes and shells act as
+  barriers;
+- opt-in prompt caching: `cache_control` breakpoints for the static prompt prefix and
+  tool schemas on profiles with `prompt_caching = true`;
 - permission modes, allow/deny rules, workspace boundary, interactive and
-  fail-closed non-interactive asks;
-- append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
-- ordered context compaction (spill, prune, snip, summarize), reactive compaction;
-- file-backed memory with lexical selection, background extraction, and a
-  single-flight coordinator;
+  fail-closed non-interactive asks, and `/auto` for full-permission mode;
+- append-only JSONL sessions, `-c/--resume`, `--fork` into a copied session, transcript
+  repair, context checkpoints;
+- append-only history: earlier messages are never rewritten to save tokens, so the
+  provider's prefix cache stays valid. Oversized tool output is spilled once, when it
+  is produced, and the transcript stores the pointer;
+- summarization at 85% of the token budget (plus reactive compaction after a
+  context-length error) is the only stage that rewrites history; the checkpoint keeps
+  the new prefix stable;
+- file-backed memory written only by the agent's `Remember` tool (strict admission
+  criteria in the tool description and prompt); records are injected into the newest
+  user message, so the cached system prefix stays stable. `/memory [list|forget X]`
+  inspects or removes them;
 - skills from `~/.config/cli-agent/skills` and `.agents/skills`;
 - extended thinking requests for providers that support them (Anthropic and DeepSeek
   presets; opt in another provider with `supports_thinking = true`), with provider
   defaults (`thinking_by_default`), budget validation, and signed-reasoning replay
   after tool calls. The DeepSeek preset defaults to `deepseek-flash[1M]` with thinking
   on;
-- throttled background memory extraction (new-message threshold + cooldown, both
-  configurable) with retryable provider errors retried and non-fatal failures logged
-  as warnings rather than tracebacks;
 - streaming reasoning display: on by default in the REPL, off in one-shot mode;
   `--thinking/--no-thinking` overrides it (one-shot mode writes reasoning to stderr);
-- REPL (`cli-agent`), one-shot (`cli-agent run`), and `/help /clear /compact /model /cost /exit`;
+- REPL (`cli-agent`), one-shot (`cli-agent run`), and
+  `/help /clear /compact /model /auto /memory /cost /exit`;
   `/clear` starts a new conversation and resets usage, so `/cost` counts from that point;
 - headless `--output-format text|json|jsonl` with a stable result schema, clean
   stdout, stderr diagnostics, and non-zero exit on incomplete turns.
+
 
 Deliberately deferred: MCP, external hook processes, subagents, teams, worktrees,
 cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, plan
 mode, tool search, OpenAI-compatible adapter, and a public plugin SDK.
 
-Notes: compaction and memory extraction are best-effort; on a clean REPL exit the
-runtime waits briefly for in-flight extraction. Permission rules are approval UX,
+Notes: compaction is best-effort. Permission rules are approval UX,
 not a sandbox — shell allow rules are skipped for commands containing common
 composition operators or launchers, quoted operators are treated conservatively,
 and `always` is scoped to the exact command/path/tool. Use an external sandbox for

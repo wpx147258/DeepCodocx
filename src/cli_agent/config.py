@@ -16,8 +16,6 @@ APP_NAME = "cli-agent"
 PERMISSION_MODES = ("bypass", "accept-edits", "default")
 MIN_THINKING_BUDGET = 1_024
 DEFAULT_THINKING_BUDGET = 4_096
-DEFAULT_MEMORY_MIN_NEW_MESSAGES = 8
-DEFAULT_MEMORY_COOLDOWN_SECONDS = 60
 
 
 def _xdg_home(env: Mapping[str, str], key: str, fallback: str) -> Path:
@@ -82,6 +80,7 @@ class ProviderConfig:
     supports_thinking: bool = False
     thinking_by_default: bool = False
     replay_reasoning: bool = False
+    prompt_caching: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +90,7 @@ class ModelConfig:
     supports_images: bool | None = None
     supports_thinking: bool | None = None
     replay_reasoning: bool | None = None
+    prompt_caching: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +111,6 @@ class AppConfig:
     allow_rules: tuple[RuleConfig, ...] = ()
     deny_rules: tuple[RuleConfig, ...] = ()
     memory_enabled: bool = True
-    memory_extraction_min_new_messages: int = DEFAULT_MEMORY_MIN_NEW_MESSAGES
-    memory_extraction_cooldown_seconds: int = DEFAULT_MEMORY_COOLDOWN_SECONDS
     thinking_enabled: bool | None = None
     thinking_budget: int = DEFAULT_THINKING_BUDGET
 
@@ -181,6 +179,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         max_output_tokens=128_000,
         supports_images=True,
         supports_thinking=True,
+        prompt_caching=True,
     ),
     "deepseek": ProviderConfig(
         name="deepseek",
@@ -189,6 +188,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         default_model="deepseek-flash[1M]",
         context_window=1_000_000,
         max_output_tokens=128_000,
+        supports_images=True,
         # Verified against DeepSeek's Anthropic-compatible endpoint.
         supports_thinking=True,
         thinking_by_default=True,
@@ -279,11 +279,7 @@ def load_config(
         max_turns = 50
     if max_turns < 1:
         raise ConfigError("max_turns must be at least 1")
-    (
-        memory_enabled,
-        memory_min_new_messages,
-        memory_cooldown_seconds,
-    ) = _parse_memory(data)
+    memory_enabled = _parse_memory(data)
     allow_rules, deny_rules = _parse_permission_rules(data.get("permissions", {}))
     thinking_enabled, thinking_budget = _parse_thinking(data.get("thinking", {}))
 
@@ -298,8 +294,6 @@ def load_config(
         allow_rules=allow_rules,
         deny_rules=deny_rules,
         memory_enabled=memory_enabled,
-        memory_extraction_min_new_messages=memory_min_new_messages,
-        memory_extraction_cooldown_seconds=memory_cooldown_seconds,
         thinking_enabled=thinking_enabled,
         thinking_budget=thinking_budget,
     )
@@ -340,6 +334,7 @@ def _merge_provider(base: ProviderConfig, raw: Mapping[str, Any]) -> ProviderCon
             raw.get("thinking_by_default", base.thinking_by_default)
         ),
         replay_reasoning=bool(raw.get("replay_reasoning", base.replay_reasoning)),
+        prompt_caching=bool(raw.get("prompt_caching", base.prompt_caching)),
     )
 
 
@@ -361,7 +356,8 @@ def _optional_bool(raw: Mapping[str, Any], key: str) -> bool | None:
     return value
 
 
-def _parse_memory(data: Mapping[str, Any]) -> tuple[bool, int, int]:
+def _parse_memory(data: Mapping[str, Any]) -> bool:
+    """Memory is opt-out. Legacy extraction knobs are accepted and ignored."""
     raw = data.get("memory", {})
     if not isinstance(raw, dict):
         raise ConfigError("[memory] must be a table")
@@ -370,19 +366,7 @@ def _parse_memory(data: Mapping[str, Any]) -> tuple[bool, int, int]:
         enabled = _optional_bool(data, "memory_enabled")
     if enabled is None:
         enabled = True
-
-    min_new = _optional_int(raw, "extraction_min_new_messages")
-    if min_new is None:
-        min_new = DEFAULT_MEMORY_MIN_NEW_MESSAGES
-    if min_new < 1:
-        raise ConfigError("memory.extraction_min_new_messages must be at least 1")
-
-    cooldown = _optional_int(raw, "extraction_cooldown_seconds")
-    if cooldown is None:
-        cooldown = DEFAULT_MEMORY_COOLDOWN_SECONDS
-    if cooldown < 0:
-        raise ConfigError("memory.extraction_cooldown_seconds must be >= 0")
-    return enabled, min_new, cooldown
+    return enabled
 
 
 def _merge_model(base: ModelConfig | None, raw: Mapping[str, Any]) -> ModelConfig:
@@ -411,6 +395,11 @@ def _merge_model(base: ModelConfig | None, raw: Mapping[str, Any]) -> ModelConfi
             _optional_bool(raw, "replay_reasoning")
             if "replay_reasoning" in raw
             else (base.replay_reasoning if base else None)
+        ),
+        prompt_caching=(
+            _optional_bool(raw, "prompt_caching")
+            if "prompt_caching" in raw
+            else (base.prompt_caching if base else None)
         ),
     )
 

@@ -25,11 +25,34 @@
   enabled, replay signed reasoning blocks; the budget must be below max output.
 - Keep prompts free of product branding; provider-specific wording belongs in the
   adapter.
-- Background helpers (summarization, memory extraction) are best-effort: retry
-  `retryable` provider errors, cap total time, and log a single warning rather than a
-  traceback. Do not let a background failure surface as an agent turn error.
+- Tool concurrency is opt-in per tool (`concurrency_safe`). Authorization and permission
+  prompts stay serialized in call order; the runtime may only parallelize consecutive
+  safe calls, and results must keep the model's call order.
+- Background helpers (summarization) are best-effort: retry `retryable` provider
+  errors, cap total time, and log a single warning rather than a traceback. Do not let
+  a background failure surface as an agent turn error.
+- Memory is written only by the model through the `Remember` tool, with strict
+  criteria (durable user preferences, not task state). Do not reintroduce background
+  extraction or per-turn summarization of the whole conversation. Records are
+  injected into the newest user message, never into the system prompt: a changing
+  system section invalidates the cached prefix.
+- Session records are append-only and must stay forward compatible: ignore unknown
+  record types and unknown fields. A resumed session restores its recorded permission
+  mode unless an explicit CLI flag overrides it. Forking copies a session directory
+  under a new id; never mutate the source session.
+- The shell danger guard is approval UX, not a sandbox. Keep the pattern list short and
+  high precision, never let `always`, bypass, or `/auto` skip it, and fail closed when
+  there is no interactive asker.
+- Provider usage: `input_tokens` excludes the cached prefix. Prompt size is
+  input + cache_read + cache_write; calibrate the estimator and report context on that
+  sum, never on `input_tokens` alone.
+- History is append-only. Never rewrite earlier messages to save tokens: a changed
+  prefix invalidates the provider's cache and costs a full re-read of the conversation.
+  Spill oversized tool output once at creation (the transcript stores the pointer), and
+  rewrite history only through a summarization checkpoint.
 - Headless JSON output is a public surface: stdout carries data only, diagnostics
   go to stderr, and every completed turn ends with a `result` object. Keep event
   and field names stable; use `stop_reason`/`is_complete` for completion.
+
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

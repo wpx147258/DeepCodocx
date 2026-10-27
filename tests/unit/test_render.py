@@ -5,13 +5,27 @@ from io import StringIO
 from rich.console import Console
 
 from cli_agent.cli.render import PrintRenderer, Renderer
-from cli_agent.events import AgentTextDelta, AgentTurnFinished
+from cli_agent.events import AgentRetry, AgentTextDelta, AgentTurnFinished
 from cli_agent.messages import Usage
 
 
 def _console() -> tuple[Console, StringIO]:
     output = StringIO()
     return Console(file=output, force_terminal=False, width=100), output
+
+
+def test_welcome_shows_the_permission_mode() -> None:
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.welcome(model="m", provider="p", session_id="s", permission_mode="accept-edits")
+    assert "mode: accept-edits" in output.getvalue()
+
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.welcome(model="m", provider="p", session_id="s", permission_mode="bypass")
+    text = output.getvalue()
+    assert "mode: bypass" in text
+    assert "no approval prompts" in text
 
 
 def test_repl_reasoning_has_a_visible_header_and_separator() -> None:
@@ -57,3 +71,87 @@ def test_print_hides_reasoning_by_default(capsys) -> None:
     assert "hidden" not in captured.out
     assert "hidden" not in captured.err
     assert "answer" in captured.out
+
+
+def test_repl_shows_retry_and_stop_reason() -> None:
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.render(AgentTextDelta("first attempt"))
+    renderer.render(AgentRetry(1, 3, "retryable", "rate limited", partial=True))
+    renderer.render(AgentTextDelta("second attempt"))
+    renderer.render(AgentTurnFinished("max_turns", Usage()))
+    text = output.getvalue()
+    assert "retrying 1/3" in text
+    assert "abandoned attempt" in text
+    assert "stopped: max_turns" in text
+
+
+def test_print_reports_retry_on_stderr(capsys) -> None:
+    renderer = PrintRenderer()
+    renderer.render(AgentTextDelta("first attempt"))
+    renderer.render(AgentRetry(2, 3, "retryable", "overloaded", partial=True))
+    renderer.render(AgentTextDelta("final answer"))
+    renderer.render(AgentTurnFinished("end_turn", Usage()))
+    captured = capsys.readouterr()
+    assert "retrying 2/3" in captured.err
+    assert "retrying" not in captured.out
+    assert "final answer" in captured.out
+
+
+def test_print_marks_failed_stop_reasons(capsys) -> None:
+    for reason in ("refusal", "error", "max_turns"):
+        renderer = PrintRenderer()
+        renderer.render(AgentTextDelta("partial"))
+        renderer.render(AgentTurnFinished(reason, Usage()))
+        captured = capsys.readouterr()
+        assert renderer.failed, reason
+        assert f"stopped: {reason}" in captured.err
+
+    renderer = PrintRenderer()
+    renderer.render(AgentTurnFinished("end_turn", Usage()))
+    assert not renderer.failed
+
+
+def test_history_renders_the_resumed_conversation() -> None:
+    from cli_agent.messages import TextBlock, ToolUseBlock, assistant_message, user_message
+
+    messages = (
+        user_message("earlier question"),
+        assistant_message(
+            [TextBlock("earlier answer"), ToolUseBlock("t1", "Bash", {"command": "ls"})]
+        ),
+        user_message("next"),
+    )
+    console, output = _console()
+    Renderer(console=console).history(messages)
+    text = output.getvalue()
+    assert "resumed history" in text
+    assert "earlier question" in text
+    assert "earlier answer" in text
+    assert "Bash" in text
+    assert "end of history" in text
+
+    console, output = _console()
+    Renderer(console=console).history(messages, limit=1)
+    assert "2 earlier message(s) hidden" in output.getvalue()
+
+
+def test_turn_summary_shows_turn_and_session_cost() -> None:
+    from cli_agent.events import AgentUsage
+    from cli_agent.messages import Usage
+
+    console, output = _console()
+    renderer = Renderer(console=console)
+    renderer.render(
+        AgentUsage(
+            Usage(1_000, 200, 100),
+            Usage(4_000_000, 285_000, 65_000_000),
+        )
+    )
+    renderer.render(
+        AgentTurnFinished("end_turn", Usage(4_000_000, 285_000, 65_000_000))
+    )
+    text = output.getvalue()
+    assert "1.0k in / 200 out" in text
+    assert "4.00M in (uncached)" in text
+    assert "cache 94.2% hit" in text

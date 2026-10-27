@@ -42,5 +42,8 @@ def build_shell(context: PromptContext) -> SystemSection:
   on rather than assuming the command succeeded.
 - Output is capped; very large output may be truncated.
 - Use the dedicated Read, Glob, and Grep tools instead of cat, find, grep, or rg.
-- A cd inside one Bash call does not persist to the next call.{windows_note}"""
+- A cd inside one Bash call does not persist to the next call.
+- Recursive deletes of `/`, the home directory, a parent directory, the current
+  directory, or a system directory require a fresh explicit approval on every call;
+  they are never remembered, even in bypass mode.{windows_note}"""
     return SystemSection("shell", text, cacheable=True)

@@ -87,11 +87,19 @@ class GlobTool:
             return ToolResult.error(f"Error: not a directory: {root}")
         try:
             matches: list[Path] = []
+            # Keep the walk out of dependency/build trees unless the caller names
+            # one explicitly in the pattern (for example ".venv/**/*.py").
+            skipped = _SKIP_DIRS - set(Path(pattern).parts)
             for item in root.glob(pattern):
-                if item.is_file():
-                    matches.append(item)
-                    if len(matches) >= MAX_GLOB_RESULTS:
-                        break
+                if not item.is_file():
+                    continue
+                if skipped and any(
+                    part in skipped for part in item.relative_to(root).parts[:-1]
+                ):
+                    continue
+                matches.append(item)
+                if len(matches) >= MAX_GLOB_RESULTS:
+                    break
         except (ValueError, OSError) as exc:
             return ToolResult.error(f"Error: invalid glob: {exc}")
         if not matches:

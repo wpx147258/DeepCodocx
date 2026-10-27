@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..context.tokens import prompt_tokens
+from ..errors import CliAgentError
 from ..events import AgentNotice
+from ..messages import Usage
 from ..runtime import AgentRuntime
 from .render import Renderer
 
@@ -20,10 +23,13 @@ _HELP = """Commands:
   /clear             clear the conversation and reset usage
   /compact           compact the context now
   /model [NAME]      show or switch model; use provider:model to switch provider
-  /cost              show token usage since the last /clear
+  /auto [on|off]     toggle full-permission mode (no approval prompts)
+  /memory [list]     list saved memories
+  /memory forget X   delete the memory named X
+  /cost              show usage since the last /clear
   /exit              leave the REPL
 
-Key flags: -p/--print, -c/--resume, --provider, --model, --permission-mode."""
+Key flags: cli-agent run for one-shot, -c/--resume, --provider, --model, --permission-mode."""
 
 
 class CommandDispatcher:
@@ -49,19 +55,40 @@ class CommandDispatcher:
             renderer.notice("Conversation cleared; usage reset.")
             return CommandResult(True)
         if name == "compact":
+            renderer.notice(
+                "Compacting rewrites the prompt prefix; the next request re-reads "
+                "the context once."
+            )
             async for event in runtime.compact():
                 renderer.render(event)
             return CommandResult(True)
         if name == "model":
             await self._model(arguments, runtime, renderer)
             return CommandResult(True)
+        if name == "auto":
+            self._auto(arguments, runtime, renderer)
+            return CommandResult(True)
+        if name == "memory":
+            self._memory(arguments, runtime, renderer)
+            return CommandResult(True)
         if name == "cost":
             usage = runtime.usage
+            sent = prompt_tokens(usage)
             renderer.notice(
-                "tokens: "
-                f"in {usage.input_tokens}, out {usage.output_tokens}, "
+                f"tokens: prompt {sent} sent "
+                f"(uncached {usage.input_tokens}, "
                 f"cache read {usage.cache_read_tokens}, "
-                f"cache write {usage.cache_write_tokens}"
+                f"cache write {usage.cache_write_tokens}), "
+                f"out {usage.output_tokens}"
+            )
+            window = runtime.context_window
+            used = runtime.context_tokens
+            share = f"{used / window * 100:.1f}%" if window else "n/a"
+            renderer.notice(f"context: ~{used} / {window} tokens ({share})")
+            renderer.notice(
+                "cache: "
+                f"last {_cache_hit(runtime.last_usage)}, "
+                f"session {_cache_hit(usage)}"
             )
             return CommandResult(True)
 
@@ -92,6 +119,63 @@ class CommandDispatcher:
             renderer.error(f"could not switch model: {type(exc).__name__}: {exc}")
             return
         renderer.notice(f"switched to {provider}:{model}")
+
+    def _auto(self, argument: str, runtime: AgentRuntime, renderer: Renderer) -> None:
+        choice = argument.strip().lower()
+        try:
+            if choice in ("", "toggle"):
+                mode = runtime.toggle_auto()
+            elif choice in ("on", "yes", "true"):
+                mode = runtime.set_auto(True)
+            elif choice in ("off", "no", "false"):
+                mode = runtime.set_auto(False)
+            else:
+                renderer.error("usage: /auto [on|off]")
+                return
+        except CliAgentError as exc:
+            renderer.error(str(exc))
+            return
+        if mode == "bypass":
+            renderer.notice(
+                "permission mode: bypass — every tool runs without asking; "
+                "use /auto off to restore approvals"
+            )
+        else:
+            renderer.notice(f"permission mode: {mode}")
+
+    def _memory(self, argument: str, runtime: AgentRuntime, renderer: Renderer) -> None:
+        action, _, rest = argument.strip().partition(" ")
+        action = action.strip().lower()
+        rest = rest.strip()
+        if action in ("", "list"):
+            records = runtime.memories()
+            if not records:
+                renderer.notice("No saved memories.")
+                return
+            lines = [
+                f"- {record.name} ({record.type})"
+                + (f": {record.description}" if record.description else "")
+                for record in records
+            ]
+            renderer.notice("Saved memories:\n" + "\n".join(lines))
+            return
+        if action == "forget":
+            if not rest:
+                renderer.error("usage: /memory forget <name>")
+                return
+            if runtime.forget_memory(rest):
+                renderer.notice(f"Forgot {rest!r}.")
+            else:
+                renderer.notice(f"No memory named {rest!r}.")
+            return
+        renderer.error("usage: /memory [list|forget <name>]")
+
+
+def _cache_hit(usage: Usage) -> str:
+    prompt = prompt_tokens(usage)
+    if prompt <= 0:
+        return "n/a"
+    return f"{usage.cache_read_tokens / prompt * 100:.1f}% hit"
 
 
 __all__ = ["CommandDispatcher", "CommandResult", "AgentNotice"]

@@ -4,24 +4,30 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 from typing import Any
 
 from rich.console import Console
 from rich.markup import escape
 from rich.text import Text
 
+from ..context.tokens import prompt_tokens
 from ..events import (
     AgentContextEvent,
     AgentError,
     AgentEvent,
     AgentNotice,
+    AgentRetry,
     AgentTextDelta,
     AgentToolFinished,
     AgentToolStarted,
     AgentTurnFinished,
     AgentUsage,
 )
-from ..messages import Usage
+from ..messages import Message, TextBlock, ToolResultBlock, ToolUseBlock, Usage
+
+# Stop reasons that mean the turn did not produce a trustworthy answer.
+_FAILED_STOP_REASONS = frozenset({"refusal", "error", "max_turns"})
 
 
 class Renderer:
@@ -37,13 +43,56 @@ class Renderer:
         self.show_reasoning = show_reasoning
         self._streamed = False
         self._reasoning_open = False
+        self._turn_usage = Usage()
 
-    def welcome(self, *, model: str, provider: str, session_id: str) -> None:
+    def welcome(
+        self,
+        *,
+        model: str,
+        provider: str,
+        session_id: str,
+        permission_mode: str = "default",
+    ) -> None:
         self.console.print(
             f"[bold]cli-agent[/bold] · {escape(provider)}/{escape(model)} · "
             f"session {escape(session_id)}"
         )
-        self.console.print("[dim]Type /help for commands, Ctrl+D to exit.[/dim]\n")
+        if permission_mode == "bypass":
+            mode = "[yellow]mode: bypass — no approval prompts[/yellow]"
+        else:
+            mode = f"[dim]mode: {escape(permission_mode)}[/dim]"
+        self.console.print(
+            f"{mode} [dim]· Type /help for commands, Ctrl+D to exit.[/dim]\n"
+        )
+
+    def history(self, messages: Sequence[Message], *, limit: int = 20) -> None:
+        """Render the tail of a resumed conversation."""
+        if not messages:
+            return
+        hidden = max(0, len(messages) - limit)
+        self._break_line()
+        self.console.print("[dim]── resumed history ──[/dim]")
+        if hidden:
+            self.console.print(f"[dim]... {hidden} earlier message(s) hidden ...[/dim]")
+        for message in messages[-limit:]:
+            role = "you" if message.role == "user" else "assistant"
+            lines: list[str] = []
+            for block in message.content:
+                if isinstance(block, TextBlock) and block.text.strip():
+                    lines.append(escape(_clip(block.text, 400)))
+                elif isinstance(block, ToolUseBlock):
+                    lines.append(
+                        f"[dim]› {escape(block.name)} "
+                        f"{escape(_short_json(block.input, 120))}[/dim]"
+                    )
+                elif isinstance(block, ToolResultBlock):
+                    text = escape(_clip(_short_content(block.content, 200), 200))
+                    style = "red" if block.is_error else "dim"
+                    lines.append(f"[{style}]← {text}[/{style}]")
+            if not lines:
+                continue
+            self.console.print(f"[bold]{role}[/bold] " + "\n  ".join(lines))
+        self.console.print("[dim]── end of history ──[/dim]")
 
     def render(self, event: AgentEvent) -> None:
         if isinstance(event, AgentTextDelta):
@@ -75,8 +124,17 @@ class Renderer:
                 self.console.print(f"[red]  error:[/red] {escape(text)}")
             else:
                 self.console.print(f"[dim]  {escape(text)}[/dim]")
+        elif isinstance(event, AgentRetry):
+            self._break_line()
+            note = f"retrying {event.attempt}/{event.max_attempts}"
+            if event.partial:
+                note += " — the text above belongs to the abandoned attempt"
+            self.console.print(
+                f"[yellow]{note}[/yellow] [dim]{escape(event.reason)}[/dim]"
+            )
         elif isinstance(event, AgentUsage):
             self.last_usage = event.total
+            self._turn_usage = self._turn_usage + event.turn
         elif isinstance(event, AgentContextEvent):
             self._break_line()
             detail = f" {event.detail}" if event.detail else ""
@@ -91,10 +149,18 @@ class Renderer:
             )
         elif isinstance(event, AgentTurnFinished):
             self._break_line()
+            stop = "" if event.stop_reason == "end_turn" else f" · stopped: {event.stop_reason}"
+            turn = self._turn_usage
+            total = event.total
+            prompt = prompt_tokens(total)
+            hit = f"{total.cache_read_tokens / prompt * 100:.1f}%" if prompt else "n/a"
             self.console.print(
-                f"[dim]tokens: in {event.total.input_tokens} / "
-                f"out {event.total.output_tokens}[/dim]"
+                f"[dim]tokens: {_tokens(turn.input_tokens)} in / "
+                f"{_tokens(turn.output_tokens)} out · session "
+                f"{_tokens(total.input_tokens)} in (uncached) · cache {hit} hit"
+                f"{escape(stop)}[/dim]"
             )
+            self._turn_usage = Usage()
 
     def notice(self, text: str) -> None:
         self._break_line()
@@ -130,6 +196,7 @@ class PrintRenderer:
         self.stop_reason: str | None = None
         self._streamed = False
         self._reasoning_open = False
+        self._turn_usage = Usage()
 
     def start(self) -> None:
         return None
@@ -152,6 +219,13 @@ class PrintRenderer:
             sys.stdout.write(event.text)
             sys.stdout.flush()
             self._streamed = True
+        elif isinstance(event, AgentRetry):
+            self._close_reasoning()
+            note = f"\n[retrying {event.attempt}/{event.max_attempts}: {event.reason}]"
+            if event.partial:
+                note += " (earlier partial output is stale)"
+            sys.stderr.write(note + "\n")
+            sys.stderr.flush()
         elif isinstance(event, (AgentToolStarted, AgentToolFinished)):
             self._close_reasoning()
         elif isinstance(event, AgentNotice):
@@ -167,6 +241,9 @@ class PrintRenderer:
             if self._streamed:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
+            if event.stop_reason in _FAILED_STOP_REASONS:
+                self.failed = True
+                print(f"stopped: {event.stop_reason}", file=sys.stderr)
 
     def fatal(self, exc: Exception) -> None:
         self.failed = True
@@ -373,6 +450,19 @@ def _short_json(value: Any, limit: int = 160) -> str:
     except (TypeError, ValueError):
         text = str(value)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _tokens(value: int) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k"
+    return str(value)
+
+
+def _clip(text: str, limit: int) -> str:
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else collapsed[:limit] + "…"
 
 
 def _short_content(content: tuple[Any, ...], limit: int = 240) -> str:

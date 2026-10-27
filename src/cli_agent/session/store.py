@@ -39,6 +39,8 @@ class LoadedSession:
     checkpoint: dict[str, Any] | None
     usage: Usage
     degraded: bool = False
+    permission_mode: str | None = None
+    auto_previous: str | None = None
 
 
 class SessionStore:
@@ -206,6 +208,19 @@ class SessionStore:
             }
         )
 
+    def append_permission_mode(self, mode: str, auto_previous: str | None) -> None:
+        if not self.persist:
+            return
+        self._append(
+            {
+                "v": SCHEMA_VERSION,
+                "type": "permission",
+                "mode": mode,
+                "auto_previous": auto_previous,
+                "at": now_iso(),
+            }
+        )
+
     def save_context(self, checkpoint: dict[str, Any] | None) -> None:
         if not self.persist:
             return
@@ -258,6 +273,8 @@ class SessionStore:
         model: str | None = None
         usage = Usage()
         degraded = False
+        permission_mode: str | None = None
+        auto_previous: str | None = None
         if not self.paths.jsonl.is_file():
             return LoadedSession(
                 session_id=self.session_id,
@@ -340,6 +357,12 @@ class SessionStore:
                 # Older clear records lack the field; they reset usage too.
                 if record.get("usage_reset", True) is not False:
                     usage = Usage()
+            elif record_type == "permission":
+                mode = record.get("mode")
+                if isinstance(mode, str) and mode:
+                    permission_mode = mode
+                    previous = record.get("auto_previous")
+                    auto_previous = previous if isinstance(previous, str) and previous else None
             else:
                 logger.debug("ignoring unknown session record type: %r", record_type)
 
@@ -360,6 +383,8 @@ class SessionStore:
             checkpoint=self.load_context(),
             usage=usage,
             degraded=degraded,
+            permission_mode=permission_mode,
+            auto_previous=auto_previous,
         )
 
     def _read_meta(self) -> dict[str, Any]:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple, Protocol
 
 from ..tools.base import ToolSpec
+from .danger import classify
 from .rules import PermissionRules
 
 type Answer = Literal["yes", "no", "always"]
@@ -93,6 +94,11 @@ class PermissionPolicy:
         self.workspace = (workspace or Path.cwd()).resolve()
         self._always_allow: set[AlwaysScope] = set()
 
+    def set_mode(self, mode: PermissionMode | str) -> PermissionMode:
+        """Change the approval mode; raises ``ValueError`` for unknown modes."""
+        self.mode = PermissionMode(mode)
+        return self.mode
+
     async def authorize(
         self,
         spec: ToolSpec,
@@ -109,6 +115,26 @@ class PermissionPolicy:
                 rule_skipped_for_composition = True
             else:
                 return PermissionOutcome(True, "allowed by configuration rule")
+
+        # A destructive delete is never covered by /auto, a session-wide
+        # "always", or the mode shortcuts: it needs one explicit confirmation.
+        # An explicit allow rule above is the only override.
+        danger = _danger_reason(spec, tool_input)
+        if danger is not None:
+            outcome = await self._ask(
+                asker,
+                spec,
+                tool_input,
+                scope=self._scope_key(spec, tool_input),
+                reason=f"high-risk command: {danger}",
+                remember=False,
+                non_interactive_reason=(
+                    f"high-risk command requires interactive approval: {danger}"
+                ),
+            )
+            if not outcome.allowed:
+                return outcome
+            return PermissionOutcome(True, f"approved once: {danger}")
 
         scope = self._scope_key(spec, tool_input)
         if scope in self._always_allow:
@@ -150,11 +176,14 @@ class PermissionPolicy:
         *,
         scope: AlwaysScope,
         reason: str,
+        remember: bool = True,
+        non_interactive_reason: str | None = None,
     ) -> PermissionOutcome:
         if asker is None or isinstance(asker, NullAsker):
             return PermissionOutcome(
                 False,
-                "approval required but the session is non-interactive",
+                non_interactive_reason
+                or "approval required but the session is non-interactive",
             )
         request = PermissionRequest(
             tool_name=spec.name,
@@ -167,6 +196,8 @@ class PermissionPolicy:
         except (EOFError, KeyboardInterrupt, OSError):
             return PermissionOutcome(False, "approval cancelled")
         if answer == "always":
+            if not remember:
+                return PermissionOutcome(True, "approved once")
             self._always_allow.add(scope)
             return PermissionOutcome(
                 True,
@@ -246,3 +277,14 @@ def _input_digest(tool_input: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         text = repr(tool_input)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _danger_reason(spec: ToolSpec, tool_input: Mapping[str, Any]) -> str | None:
+    """Reason string when a shell command trips the destructive-command guard."""
+    if spec.category != "shell":
+        return None
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    danger = classify(command)
+    return danger.reason if danger is not None else None

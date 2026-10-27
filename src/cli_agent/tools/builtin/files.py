@@ -126,6 +126,12 @@ class ReadTool:
         lines = text.splitlines(keepends=True)
         offset = max(1, int(args.get("offset", 1)))
         limit = max(1, int(args.get("limit", 2000)))
+        if not lines:
+            return ToolResult.text("(empty file)")
+        if offset > len(lines):
+            return ToolResult.error(
+                f"Error: offset {offset} is past the end of the file ({len(lines)} lines)"
+            )
         selected = lines[offset - 1 : offset - 1 + limit]
 
         rendered: list[str] = []
