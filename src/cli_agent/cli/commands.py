@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..context.tokens import prompt_tokens
 from ..errors import CliAgentError
 from ..events import AgentNotice
 from ..runtime import AgentRuntime
@@ -62,11 +63,13 @@ class CommandDispatcher:
             return CommandResult(True)
         if name == "cost":
             usage = runtime.usage
+            sent = prompt_tokens(usage)
             renderer.notice(
-                "tokens: "
-                f"in {usage.input_tokens} (uncached), out {usage.output_tokens}, "
+                f"tokens: prompt {sent} sent "
+                f"(uncached {usage.input_tokens}, "
                 f"cache read {usage.cache_read_tokens}, "
-                f"cache write {usage.cache_write_tokens}"
+                f"cache write {usage.cache_write_tokens}), "
+                f"out {usage.output_tokens}"
             )
             window = runtime.context_window
             used = runtime.context_tokens

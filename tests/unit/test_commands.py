@@ -117,8 +117,10 @@ async def test_cost_shows_context_usage(tmp_path: Path) -> None:
     await dispatcher.dispatch("/cost", runtime, renderer)
 
     text = output.getvalue()
-    assert "uncached" in text
+    assert "prompt 1000 sent" in text
+    assert "uncached 100" in text
     assert "cache read 900" in text
+    assert "out 20" in text
     assert "context: ~" in text
     assert "200000" in text
     await runtime.close()
