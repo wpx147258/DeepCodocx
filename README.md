@@ -103,6 +103,12 @@ shell commands stay ordered barriers, and permission prompts are always serializ
 change is appended to the session, so `-c` restores it (an explicit `--permission-mode`
 still wins), and the REPL banner shows the active mode.
 
+Shell commands pass one static guard first: recursive deletes aimed at `/`, `$HOME`, a
+parent directory, the current directory, or a system directory always need a fresh
+interactive approval — bypass and `/auto` do not skip it, and "always" is never
+remembered for them. It is approval UX, not a sandbox: `sh -c`, `xargs`, and scripts are
+out of scope, and an explicit `permissions.allow` rule still wins.
+
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from
 `AGENTS.md` and `.agents/`; `cli-agent` does not reuse `.claude/` or `CLAUDE.md`.

@@ -34,5 +34,8 @@
 - Session records are append-only and must stay forward compatible: ignore unknown
   record types and unknown fields. A resumed session restores its recorded permission
   mode unless an explicit CLI flag overrides it.
+- The shell danger guard is approval UX, not a sandbox. Keep the pattern list short and
+  high precision, never let `always`, bypass, or `/auto` skip it, and fail closed when
+  there is no interactive asker.
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

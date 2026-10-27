@@ -133,3 +133,48 @@ def test_controller_ignores_unknown_restored_mode(tmp_path: Path) -> None:
     )
     controller.restore("yolo")
     assert controller.mode == "default"
+
+
+async def test_high_risk_delete_asks_even_in_bypass(tmp_path: Path) -> None:
+    policy = PermissionPolicy(PermissionMode.BYPASS, workspace=tmp_path)
+    asker = RecordingAsker("yes")
+    outcome = await policy.authorize(SHELL, {"command": "rm -rf /"}, asker)
+    assert outcome.allowed
+    assert asker.requests
+    assert "high-risk" in asker.requests[0].reason
+    assert "filesystem root" in asker.requests[0].reason
+
+
+async def test_high_risk_delete_fails_closed_without_an_asker(tmp_path: Path) -> None:
+    policy = PermissionPolicy(PermissionMode.BYPASS, workspace=tmp_path)
+    for asker in (None, NullAsker()):
+        outcome = await policy.authorize(SHELL, {"command": "rm -rf /"}, asker)
+        assert not outcome.allowed
+        assert "high-risk" in outcome.reason
+
+
+async def test_high_risk_delete_is_never_remembered(tmp_path: Path) -> None:
+    policy = PermissionPolicy(PermissionMode.ACCEPT_EDITS, workspace=tmp_path)
+    asker = RecordingAsker("always")
+    for command in ("rm -rf /", "rm -rf ~", "rm -rf *"):
+        assert (await policy.authorize(SHELL, {"command": command}, asker)).allowed
+    # Answering "always" must not turn the guard off for later commands.
+    assert len(asker.requests) == 3
+
+
+async def test_safe_shell_commands_keep_the_mode_shortcuts(tmp_path: Path) -> None:
+    policy = PermissionPolicy(PermissionMode.BYPASS, workspace=tmp_path)
+    asker = RecordingAsker("yes")
+    outcome = await policy.authorize(SHELL, {"command": "rm -rf build"}, asker)
+    assert outcome.allowed
+    assert asker.requests == []
+
+
+async def test_explicit_allow_rule_beats_the_guard(tmp_path: Path) -> None:
+    rules = PermissionRules(allow=(PermissionRule("Bash", {"command": "rm -rf /tmp/*"}),))
+    policy = PermissionPolicy(PermissionMode.DEFAULT, rules=rules, workspace=tmp_path)
+    outcome = await policy.authorize(
+        SHELL, {"command": "rm -rf /tmp/*"}, NullAsker()
+    )
+    assert outcome.allowed
+    assert "configuration rule" in outcome.reason

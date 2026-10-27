@@ -238,6 +238,31 @@ async def _consume(runtime, text: str) -> None:
         pass
 
 
+async def test_high_risk_shell_command_is_blocked_without_an_asker(tmp_path: Path) -> None:
+    shell = ShellTool()
+    policy = PermissionPolicy(PermissionMode.BYPASS, workspace=tmp_path)
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Bash", {"command": "rm -rf /"})])],
+            [text_response("giving up")],
+        ]
+    )
+    runtime, _ = make_runtime(
+        provider,
+        tmp_path=tmp_path,
+        tools=[shell],
+        policy=policy,
+        asker=NullAsker(),
+    )
+    await _consume(runtime, "clean the disk")
+
+    assert shell.calls == []
+    result = runtime.messages[2].tool_results()[0]
+    assert result.is_error
+    assert "high-risk" in result.content[0].text
+    await runtime.close()
+
+
 async def test_request_carries_thinking_config(tmp_path: Path) -> None:
     from cli_agent.providers.base import ThinkingConfig
 
