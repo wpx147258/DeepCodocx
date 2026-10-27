@@ -63,6 +63,11 @@ class PermissionPolicy:
         self.workspace = (workspace or Path.cwd()).resolve()
         self._always_allow: set[str] = set()
 
+    def set_mode(self, mode: PermissionMode | str) -> PermissionMode:
+        """Change the approval mode; raises ``ValueError`` for unknown modes."""
+        self.mode = PermissionMode(mode)
+        return self.mode
+
     async def authorize(
         self,
         spec: ToolSpec,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..errors import CliAgentError
 from ..events import AgentNotice
 from ..runtime import AgentRuntime
 from .render import Renderer
@@ -20,6 +21,7 @@ _HELP = """Commands:
   /clear             clear the conversation
   /compact           compact the context now
   /model [NAME]      show or switch model; use provider:model to switch provider
+  /auto [on|off]     toggle full-permission mode (no approval prompts)
   /cost              show cumulative token usage
   /exit              leave the REPL
 
@@ -54,6 +56,9 @@ class CommandDispatcher:
             return CommandResult(True)
         if name == "model":
             await self._model(arguments, runtime, renderer)
+            return CommandResult(True)
+        if name == "auto":
+            self._auto(arguments, runtime, renderer)
             return CommandResult(True)
         if name == "cost":
             usage = runtime.usage
@@ -92,6 +97,29 @@ class CommandDispatcher:
             renderer.error(f"could not switch model: {type(exc).__name__}: {exc}")
             return
         renderer.notice(f"switched to {provider}:{model}")
+
+    def _auto(self, argument: str, runtime: AgentRuntime, renderer: Renderer) -> None:
+        choice = argument.strip().lower()
+        try:
+            if choice in ("", "toggle"):
+                mode = runtime.toggle_auto()
+            elif choice in ("on", "yes", "true"):
+                mode = runtime.set_auto(True)
+            elif choice in ("off", "no", "false"):
+                mode = runtime.set_auto(False)
+            else:
+                renderer.error("usage: /auto [on|off]")
+                return
+        except CliAgentError as exc:
+            renderer.error(str(exc))
+            return
+        if mode == "bypass":
+            renderer.notice(
+                "permission mode: bypass — every tool runs without asking; "
+                "use /auto off to restore approvals"
+            )
+        else:
+            renderer.notice(f"permission mode: {mode}")
 
 
 __all__ = ["CommandDispatcher", "CommandResult", "AgentNotice"]

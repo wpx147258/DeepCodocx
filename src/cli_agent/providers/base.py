@@ -32,6 +32,9 @@ class ModelProfile:
     supports_images: bool = False
     supports_thinking: bool = False
     replay_reasoning: bool = False
+    # Emit cache_control breakpoints for the system prompt and tool schemas.
+    # Off by default: third-party Anthropic-compatible endpoints may reject them.
+    prompt_caching: bool = False
 
 
 @dataclass(frozen=True, slots=True)

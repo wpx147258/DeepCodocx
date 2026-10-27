@@ -25,6 +25,9 @@
   enabled, replay signed reasoning blocks; the budget must be below max output.
 - Keep prompts free of product branding; provider-specific wording belongs in the
   adapter.
+- Tool concurrency is opt-in per tool (`concurrency_safe`). Authorization and permission
+  prompts stay serialized in call order; the runtime may only parallelize consecutive
+  safe calls, and results must keep the model's call order.
 - Background helpers (summarization, memory extraction) are best-effort: retry
   `retryable` provider errors, cap total time, and log a single warning rather than a
   traceback. Do not let a background failure surface as an agent turn error.

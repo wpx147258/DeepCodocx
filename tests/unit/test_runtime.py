@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from cli_agent.events import (
     AgentError,
@@ -12,6 +16,7 @@ from cli_agent.events import (
 )
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from cli_agent.providers.base import TextDelta
+from cli_agent.tools.base import ToolContext, ToolResult, ToolSpec
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
 
@@ -243,4 +248,135 @@ async def test_request_carries_thinking_config(tmp_path: Path) -> None:
     await _consume(runtime, "go")
     assert provider.requests[0].thinking == ThinkingConfig(2_048)
     assert runtime.thinking == ThinkingConfig(2_048)
+    await runtime.close()
+
+
+class _BarrierReadTool:
+    """Only completes if two calls are in flight at the same time."""
+
+    spec = ToolSpec(
+        name="Read",
+        description="Read a file.",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        category="read",
+        concurrency_safe=True,
+    )
+
+    def __init__(self, barrier: asyncio.Barrier) -> None:
+        self.barrier = barrier
+        self.paths: list[str] = []
+
+    async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        self.paths.append(str(args["path"]))
+        await asyncio.wait_for(self.barrier.wait(), timeout=5)
+        return ToolResult.text(f"read {args['path']}")
+
+
+class _RecordingTool:
+    def __init__(self, name: str, log: list[str], *, safe: bool, category: str) -> None:
+        self.log = log
+        self.spec = ToolSpec(
+            name=name,
+            description=name,
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            category=category,  # type: ignore[arg-type]
+            concurrency_safe=safe,
+        )
+
+    async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+        self.log.append(self.spec.name)
+        await asyncio.sleep(0)
+        return ToolResult.text(self.spec.name)
+
+
+async def test_concurrency_safe_calls_run_in_parallel(tmp_path: Path) -> None:
+    tool = _BarrierReadTool(asyncio.Barrier(2))
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Read", {"path": "a"}), ("t2", "Read", {"path": "b"})])],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[tool])
+    events = [event async for event in runtime.run_turn("go")]
+    finished = [event for event in events if isinstance(event, AgentToolFinished)]
+    # Results keep the model's call order even though the runs overlap.
+    assert [event.tool_use_id for event in finished] == ["t1", "t2"]
+    assert not any(event.is_error for event in finished)
+    assert tool.paths == ["a", "b"]
+    await runtime.close()
+
+
+async def test_unsafe_calls_act_as_parallel_barriers(tmp_path: Path) -> None:
+    log: list[str] = []
+    read = _RecordingTool("Read", log, safe=True, category="read")
+    write = _RecordingTool("Write", log, safe=False, category="write")
+    provider = FakeProvider(
+        [
+            [
+                tool_response(
+                    [
+                        ("t1", "Read", {}),
+                        ("t2", "Write", {}),
+                        ("t3", "Read", {}),
+                    ]
+                )
+            ],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[read, write])
+    await _consume(runtime, "go")
+    assert log == ["Read", "Write", "Read"]
+    await runtime.close()
+
+
+async def test_cancelling_parallel_tools_records_cancelled_results(tmp_path: Path) -> None:
+    started = asyncio.Event()
+
+    class _BlockingTool:
+        spec = ToolSpec(
+            name="Read",
+            description="Read a file.",
+            input_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            category="read",
+            concurrency_safe=True,
+        )
+
+        async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
+            started.set()
+            await asyncio.Event().wait()
+            return ToolResult.text("never")
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Read", {"path": "a"}), ("t2", "Read", {"path": "b"})])],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[_BlockingTool()])
+
+    async def consume() -> None:
+        async for _ in runtime.run_turn("go"):
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    results = runtime.messages[-1].tool_results()
+    assert {result.tool_use_id for result in results} == {"t1", "t2"}
+    assert all(result.is_error for result in results)
+    assert "cancelled" in results[0].content[0].text.lower()
     await runtime.close()

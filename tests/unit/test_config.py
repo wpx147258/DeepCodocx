@@ -11,6 +11,7 @@ from cli_agent.config import (
     resolve_base_url,
 )
 from cli_agent.errors import ConfigError
+from cli_agent.providers.factory import build_profile
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -227,3 +228,31 @@ def test_memory_extraction_validation(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="at least 1"):
         load_config(cwd=tmp_path, env=_env(tmp_path))
+
+
+def test_prompt_caching_defaults_and_overrides(tmp_path: Path) -> None:
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    # The first-party preset caches the static prompt prefix; compatible
+    # third-party endpoints must not receive cache_control unless opted in.
+    assert config.providers["anthropic"].prompt_caching is True
+    assert config.providers["deepseek"].prompt_caching is False
+    profile = build_profile(config, config.providers["anthropic"], "claude-sonnet-4-6")
+    assert profile.prompt_caching is True
+
+    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[providers.deepseek]
+prompt_caching = true
+
+[models."deepseek-flash[1M]"]
+prompt_caching = false
+""",
+        encoding="utf-8",
+    )
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.providers["deepseek"].prompt_caching is True
+    assert config.models["deepseek-flash[1M]"].prompt_caching is False
+    profile = build_profile(config, config.providers["deepseek"], "deepseek-flash[1M]")
+    assert profile.prompt_caching is False

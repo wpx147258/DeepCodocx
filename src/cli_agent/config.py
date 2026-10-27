@@ -82,6 +82,7 @@ class ProviderConfig:
     supports_thinking: bool = False
     thinking_by_default: bool = False
     replay_reasoning: bool = False
+    prompt_caching: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +92,7 @@ class ModelConfig:
     supports_images: bool | None = None
     supports_thinking: bool | None = None
     replay_reasoning: bool | None = None
+    prompt_caching: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +183,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderConfig] = {
         max_output_tokens=128_000,
         supports_images=True,
         supports_thinking=True,
+        prompt_caching=True,
     ),
     "deepseek": ProviderConfig(
         name="deepseek",
@@ -333,6 +336,7 @@ def _merge_provider(base: ProviderConfig, raw: Mapping[str, Any]) -> ProviderCon
             raw.get("thinking_by_default", base.thinking_by_default)
         ),
         replay_reasoning=bool(raw.get("replay_reasoning", base.replay_reasoning)),
+        prompt_caching=bool(raw.get("prompt_caching", base.prompt_caching)),
     )
 
 
@@ -404,6 +408,11 @@ def _merge_model(base: ModelConfig | None, raw: Mapping[str, Any]) -> ModelConfi
             _optional_bool(raw, "replay_reasoning")
             if "replay_reasoning" in raw
             else (base.replay_reasoning if base else None)
+        ),
+        prompt_caching=(
+            _optional_bool(raw, "prompt_caching")
+            if "prompt_caching" in raw
+            else (base.prompt_caching if base else None)
         ),
     )
 

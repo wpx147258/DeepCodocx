@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 
 from .context.memory import ExtractionCoordinator, MemoryExtractor, MemoryStore
@@ -39,7 +39,7 @@ from .messages import (
     tool_result_message,
     user_message,
 )
-from .permissions.policy import Asker, PermissionPolicy
+from .permissions.policy import Asker, PermissionMode, PermissionPolicy
 from .providers.base import (
     ModelProfile,
     ModelRequest,
@@ -53,7 +53,7 @@ from .providers.base import (
 )
 from .session.store import SessionStore
 from .tools.base import ToolContext, ToolResult
-from .tools.execution import ToolExecutor
+from .tools.execution import PreparedCall, ToolExecutor
 from .tools.registry import ToolRegistry
 from .transcript import Transcript
 
@@ -113,6 +113,8 @@ class AgentRuntime:
         # Providers replaced by /model. They stay open until shutdown because a
         # summary or extraction call may still hold one.
         self._retired: list[Provider] = []
+        # Mode to restore when /auto is switched off again.
+        self._auto_previous: str | None = None
 
     # ------------------------------------------------------------------
     # public surface
@@ -141,6 +143,32 @@ class AgentRuntime:
     @property
     def thinking(self) -> ThinkingConfig | None:
         return self._deps.thinking
+
+    @property
+    def permission_mode(self) -> str:
+        return self._deps.policy.mode.value
+
+    def set_permission_mode(self, mode: str) -> str:
+        try:
+            return self._deps.policy.set_mode(mode).value
+        except ValueError as exc:
+            raise ConfigError(f"unknown permission mode {mode!r}") from exc
+
+    def set_auto(self, enabled: bool) -> str:
+        """Run tools without asking. Remembers the mode it replaced."""
+        if enabled:
+            if self._deps.policy.mode is not PermissionMode.BYPASS:
+                self._auto_previous = self._deps.policy.mode.value
+                self.set_permission_mode(PermissionMode.BYPASS.value)
+            return self.permission_mode
+        if self._auto_previous is not None:
+            previous, self._auto_previous = self._auto_previous, None
+            return self.set_permission_mode(previous)
+        # Bypass was configured from outside /auto; leave it alone.
+        return self.permission_mode
+
+    def toggle_auto(self) -> str:
+        return self.set_auto(self._deps.policy.mode is not PermissionMode.BYPASS)
 
     async def run_turn(self, text: str | None = None) -> AsyncIterator[AgentEvent]:
         if text is not None:
@@ -280,23 +308,31 @@ class AgentRuntime:
 
             results: list[ToolResultBlock] = []
             completed: set[str] = set()
+            # Authorize in model order (asks stay serialized), then run
+            # consecutive concurrency-safe reads in parallel.
+            prepared_calls = [
+                await self._deps.executor.prepare(
+                    call,
+                    policy=self._deps.policy,
+                    asker=self._deps.asker,
+                    parse_error=parse_errors.get(call.id),
+                )
+                for call in calls
+            ]
             try:
-                for call in calls:
-                    result = await self._deps.executor.execute(
-                        call,
-                        ctx=self._deps.tool_context,
-                        policy=self._deps.policy,
-                        asker=self._deps.asker,
-                        parse_error=parse_errors.get(call.id),
+                for batch in _tool_batches(prepared_calls):
+                    outcomes = await _run_batch(
+                        self._deps.executor, batch, self._deps.tool_context
                     )
-                    completed.add(call.id)
-                    results.append(_to_result_block(call.id, result))
-                    yield AgentToolFinished(
-                        call.id,
-                        call.name,
-                        result.content,
-                        result.is_error,
-                    )
+                    for item, result in zip(batch, outcomes, strict=True):
+                        completed.add(item.call.id)
+                        results.append(_to_result_block(item.call.id, result))
+                        yield AgentToolFinished(
+                            item.call.id,
+                            item.call.name,
+                            result.content,
+                            result.is_error,
+                        )
             except asyncio.CancelledError:
                 for call in calls:
                     if call.id not in completed:
@@ -449,6 +485,29 @@ def _to_result_block(tool_use_id: str, result: ToolResult) -> ToolResultBlock:
         content=result.content,
         is_error=result.is_error,
     )
+
+
+def _tool_batches(prepared: Sequence[PreparedCall]) -> Iterator[list[PreparedCall]]:
+    """Group consecutive concurrency-safe calls; anything else is a barrier."""
+    batch: list[PreparedCall] = []
+    for item in prepared:
+        if item.runnable and item.tool is not None and item.tool.spec.concurrency_safe:
+            batch.append(item)
+            continue
+        if batch:
+            yield batch
+            batch = []
+        yield [item]
+    if batch:
+        yield batch
+
+
+async def _run_batch(
+    executor: ToolExecutor, batch: Sequence[PreparedCall], ctx: ToolContext
+) -> list[ToolResult]:
+    if len(batch) == 1:
+        return [await executor.run(batch[0], ctx=ctx)]
+    return list(await asyncio.gather(*(executor.run(item, ctx=ctx) for item in batch)))
 
 
 def _cancelled_result(tool_use_id: str) -> ToolResultBlock:

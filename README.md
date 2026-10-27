@@ -97,6 +97,10 @@ splicing two partial answers together.
 
 Built-in tools: `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`.
 `Glob` skips dependency and build directories unless the pattern or `path` names one.
+Consecutive read-only calls (`concurrency_safe`) in one turn run in parallel; writes and
+shell commands stay ordered barriers, and permission prompts are always serialized.
+`/auto [on|off]` toggles full-permission mode for the session and remembers the mode it
+replaced.
 
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from
@@ -113,7 +117,11 @@ Sessions, memory, and session spill files live under
 The prompt is assembled from ordered modules under `src/cli_agent/context/prompts/`:
 identity, workspace, tools, file/shell policies, project instructions, memory, skills,
 and compaction. The tool list is generated from the live registry, and modules only
-claim capabilities the harness actually implements.
+claim capabilities the harness actually implements. Modules marked `cacheable` form the
+static prefix; when the provider profile sets `prompt_caching = true` (the `anthropic`
+preset does) the adapter emits `cache_control` breakpoints for that prefix and the tool
+schemas. Third-party Anthropic-compatible endpoints stay off by default because they may
+reject the field.
 
 ## Status (v1)
 
@@ -124,8 +132,13 @@ Implemented today:
 - explicit provider abstraction plus the Anthropic-compatible adapter
   (Anthropic, DeepSeek, Kimi, MiniMax, GLM presets);
 - `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`;
+- ordered tool execution inside the one loop: permission checks stay serialized, and
+  consecutive `concurrency_safe` reads run in parallel while writes and shells act as
+  barriers;
+- opt-in prompt caching: `cache_control` breakpoints for the static prompt prefix and
+  tool schemas on profiles with `prompt_caching = true`;
 - permission modes, allow/deny rules, workspace boundary, interactive and
-  fail-closed non-interactive asks;
+  fail-closed non-interactive asks, and `/auto` for full-permission mode;
 - append-only JSONL sessions, `-c/--resume`, transcript repair, context checkpoints;
 - ordered context compaction (spill, prune, snip, summarize), reactive compaction;
 - file-backed memory with lexical selection, background extraction, and a
@@ -141,7 +154,7 @@ Implemented today:
   as warnings rather than tracebacks;
 - streaming reasoning display: on by default in the REPL, off in print mode;
   `--thinking/--no-thinking` overrides it (print mode writes reasoning to stderr);
-- REPL, `-p/--print`, and `/help /clear /compact /model /cost /exit`.
+- REPL, `-p/--print`, and `/help /clear /compact /model /auto /cost /exit`.
 
 Deliberately deferred: MCP, external hook processes, subagents, teams, worktrees,
 cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, plan
