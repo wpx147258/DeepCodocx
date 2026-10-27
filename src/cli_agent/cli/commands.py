@@ -29,7 +29,7 @@ _HELP = """Commands:
   /cost              show cumulative token usage
   /exit              leave the REPL
 
-Key flags: -p/--print, -c/--resume, --provider, --model, --permission-mode."""
+Key flags: cli-agent run for one-shot, -c/--resume, --provider, --model, --permission-mode."""
 
 
 class CommandDispatcher:

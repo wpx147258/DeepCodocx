@@ -64,6 +64,25 @@ ProviderBuild = tuple[Provider, ModelProfile, ThinkingConfig | None]
 
 
 @dataclass
+class ProviderSlot:
+    """Mutable current-provider holder shared with background helpers."""
+
+    provider: Provider
+    profile: ModelProfile
+    thinking: ThinkingConfig | None = None
+
+    def replace(
+        self,
+        provider: Provider,
+        profile: ModelProfile,
+        thinking: ThinkingConfig | None,
+    ) -> None:
+        self.provider = provider
+        self.profile = profile
+        self.thinking = thinking
+
+
+@dataclass
 class RuntimeDeps:
     provider: Provider
     profile: ModelProfile
@@ -84,9 +103,7 @@ class RuntimeDeps:
     memory: MemoryStore | None = None
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
-    # Lets the host re-point the background summarizer at the provider that is
-    # actually active after a model switch.
-    on_model_switch: Callable[[Provider, ModelProfile], None] | None = None
+    provider_slot: ProviderSlot | None = None
 
 
 @dataclass
@@ -100,6 +117,10 @@ class _Recovery:
 class AgentRuntime:
     def __init__(self, deps: RuntimeDeps) -> None:
         self._deps = deps
+        if deps.provider_slot is None:
+            deps.provider_slot = ProviderSlot(
+                deps.provider, deps.profile, deps.thinking
+            )
         self._usage = deps.initial_usage
         self._active_request = ""
         self._last_request_tokens = 0
@@ -264,6 +285,12 @@ class AgentRuntime:
                     yield pending_event
                 if finish is None:
                     continue
+                if finish in ("refusal", "error"):
+                    yield AgentError(f"provider stopped with {finish}", finish)
+                elif finish == "max_tokens":
+                    yield AgentNotice(
+                        "Output limit reached; the response may be incomplete."
+                    )
                 yield AgentTurnFinished(finish, self._usage)
                 return
 
@@ -309,8 +336,8 @@ class AgentRuntime:
         self._deps.provider = provider
         self._deps.profile = profile
         self._deps.thinking = thinking
-        if self._deps.on_model_switch is not None:
-            self._deps.on_model_switch(provider, profile)
+        if self._deps.provider_slot is not None:
+            self._deps.provider_slot.replace(provider, profile, thinking)
         if old is not provider:
             # Background helpers may still be mid-call on the old provider, and
             # summarization would otherwise keep using a closed client. Close it

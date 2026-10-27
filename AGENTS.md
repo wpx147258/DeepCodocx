@@ -49,5 +49,9 @@
   prefix invalidates the provider's cache and costs a full re-read of the conversation.
   Spill oversized tool output once at creation (the transcript stores the pointer), and
   rewrite history only through a summarization checkpoint.
+- Headless JSON output is a public surface: stdout carries data only, diagnostics
+  go to stderr, and every completed turn ends with a `result` object. Keep event
+  and field names stable; use `stop_reason`/`is_complete` for completion.
+
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

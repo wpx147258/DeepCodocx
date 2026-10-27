@@ -10,6 +10,7 @@ import pytest
 from cli_agent.context.tokens import TokenEstimator
 from cli_agent.events import (
     AgentError,
+    AgentNotice,
     AgentRetry,
     AgentTextDelta,
     AgentToolFinished,
@@ -583,4 +584,42 @@ async def test_requests_append_without_rewriting_the_prefix(tmp_path: Path) -> N
         # Every request must extend the previous one byte for byte; a rewrite
         # here would invalidate the provider's cached prefix.
         assert later[: len(earlier)] == earlier
+    await runtime.close()
+
+
+async def test_refusal_stop_reason_is_preserved(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("no", stop_reason="refusal")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentError) and event.kind == "refusal" for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "refusal"
+    await runtime.close()
+
+
+async def test_error_stop_reason_is_preserved(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("bad", stop_reason="error")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentError) and event.kind == "error" for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "error"
+    await runtime.close()
+
+
+async def test_max_tokens_exhaustion_is_reported(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            [text_response("a", stop_reason="max_tokens")],
+            [text_response("b", stop_reason="max_tokens")],
+            [text_response("c", stop_reason="max_tokens")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    events = [event async for event in runtime.run_turn("go")]
+    assert any(isinstance(event, AgentNotice) and "Output limit" in event.text for event in events)
+    assert isinstance(events[-1], AgentTurnFinished)
+    assert events[-1].stop_reason == "max_tokens"
+    assert len(provider.requests) == 3
+
     await runtime.close()

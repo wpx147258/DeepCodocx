@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +35,7 @@ from .providers.base import (
     ThinkingConfig,
 )
 from .providers.factory import build_provider
-from .runtime import AgentRuntime, RuntimeDeps
+from .runtime import AgentRuntime, ProviderSlot, RuntimeDeps
 from .session.paths import latest_session_id
 from .session.store import SessionStore
 from .tools.base import ToolContext
@@ -88,6 +88,24 @@ async def _complete_request(
     if last is not None:
         raise last
     return ""
+
+
+def _make_completer(slot: ProviderSlot) -> Callable[[str, int], Awaitable[str]]:
+    """Create a tool-free helper caller bound to the current provider slot."""
+
+    async def complete(prompt: str, max_tokens: int) -> str:
+        profile = slot.profile
+        request = ModelRequest(
+            model=profile.model,
+            system=(SystemSection("summarizer", _SUMMARIZER_SYSTEM),),
+            messages=(user_message(prompt),),
+            tools=(),
+            max_output_tokens=max_tokens,
+            profile=profile,
+        )
+        return await _complete_request(slot.provider, request)
+
+    return complete
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +172,17 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         transcript = Transcript(loaded.messages)
         initial_usage = loaded.usage
         degraded = loaded.degraded
-        provider_name = loaded.provider or config.default_provider
-        model_name = loaded.model or config.default_model
+        # Explicit CLI choices win over the session record. If the provider
+        # changes without an explicit model, do not carry the old session's
+        # model across providers; let the new provider default apply.
+        provider_name = options.provider or loaded.provider or config.default_provider
+        if options.model:
+            model_name = options.model
+        elif options.provider and options.provider != loaded.provider:
+            # A provider change must not carry the old provider's model across.
+            model_name = None
+        else:
+            model_name = loaded.model or config.default_model
         if loaded.checkpoint:
             checkpoint = ContextCheckpoint.from_dict(loaded.checkpoint)
         # The session's recorded mode beats the config default, but an explicit
@@ -184,6 +211,8 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         if store is not None:
             store.close()
         raise
+
+    slot = ProviderSlot(provider, profile, thinking)
 
     if store is None:
         store = SessionStore.new(
@@ -223,23 +252,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     )
     estimator = TokenEstimator()
 
-    # Background work follows the active provider so /model does not leave the
-    # summarizer and memory extractor on a stale (or later closed) client.
-    active: dict[str, Provider] = {"provider": provider}
-    active_profile: dict[str, ModelProfile] = {"profile": profile}
-
-    async def complete(prompt: str, max_tokens: int) -> str:
-        current = active["provider"]
-        current_profile = active_profile["profile"]
-        request = ModelRequest(
-            model=current_profile.model,
-            system=(SystemSection("summarizer", _SUMMARIZER_SYSTEM),),
-            messages=(user_message(prompt),),
-            tools=(),
-            max_output_tokens=max_tokens,
-            profile=current_profile,
-        )
-        return await _complete_request(current, request)
+    complete = _make_completer(slot)
 
     async def summarize(text: str, max_tokens: int) -> str:
         prompt = _COMPACT_PROMPT + "\n\nConversation:\n" + text
@@ -270,10 +283,6 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         thinking = ThinkingConfig(config.thinking_budget) if enabled else None
         return provider, profile, thinking
 
-    def on_model_switch(new_provider: Provider, new_profile: ModelProfile) -> None:
-        active["provider"] = new_provider
-        active_profile["profile"] = new_profile
-
     deps = RuntimeDeps(
         provider=provider,
         profile=profile,
@@ -294,7 +303,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         memory=memory_store,
         provider_factory=provider_factory,
         thinking=thinking,
-        on_model_switch=on_model_switch,
+        provider_slot=slot,
     )
     runtime = AgentRuntime(deps)
     runtime.restore_permission(initial_mode, initial_auto_previous)

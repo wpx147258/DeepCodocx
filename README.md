@@ -65,20 +65,74 @@ budget_tokens = 100000  # must be below max_output_tokens
 enabled = true
 ```
 
+## Headless output
+
+`cli-agent run` is the one-shot headless mode. Use `run -` to read the prompt
+from stdin. `--output-format` selects the output shape:
+
+| Format | stdout |
+|---|---|
+| `text` (default) | assistant text only |
+| `json` | one JSON result object |
+| `jsonl` | one JSON object per line, emitted as events arrive |
+
+stdout carries data only; logs and diagnostics go to stderr.
+
+```bash
+printf "Summarize this repo" | cli-agent run --output-format jsonl -
+cli-agent run --permission-mode bypass --output-format json "Run the tests"
+```
+
+JSONL event types:
+
+```text
+session_start, text, reasoning, tool_started, tool_finished,
+usage, notice, context, error, result
+```
+
+`reasoning` is included only with `--thinking`. The final `result` object includes
+`session_id`, `provider`, `model`, `resumed`, `stop_reason`, `is_error`,
+`is_complete`, `text`, `tool_calls`, `usage`, `notices`, `context_events`, and
+`error`.
+
+Exit codes:
+
+```text
+0    stop_reason == end_turn
+2    agent error, or incomplete turn (max_tokens / max_turns / refusal)
+1    config / provider / session error
+130  interrupted
+```
+
+In headless mode there is no interactive permission asker: use
+`--permission-mode bypass` (or allow rules) if the task needs shell commands.
+
 ## Usage
 
 ```bash
 cli-agent                              # interactive REPL
-cli-agent -p "fix the failing test"    # one-shot
-cli-agent -c                           # resume the latest session
+cli-agent -c                           # resume the latest REPL session
 cli-agent --resume <session-id>
 cli-agent --permission-mode default
-cli-agent --provider deepseek           # defaults to deepseek-flash[1M] + thinking
+cli-agent --provider deepseek           # REPL, defaults to deepseek-flash[1M] + thinking
 cli-agent --provider deepseek --no-extended-thinking
                                         # disable the provider's thinking default
 cli-agent --no-thinking                 # hide model reasoning in the REPL
-cli-agent --thinking -p "..."           # show reasoning on stderr in print mode
+
+cli-agent run "fix the failing test"    # one-shot
+cli-agent run -                         # one-shot, prompt from stdin
+cli-agent run -c "continue"             # one-shot, resume the latest session
+cli-agent run --permission-mode bypass "run the tests"
+cli-agent run --output-format jsonl "..."  # JSONL events
+cli-agent run --thinking "..."           # reasoning on stderr
 ```
+
+Common options may be placed before or after `run` (for example
+`cli-agent --provider deepseek run "..."` and `cli-agent run --provider deepseek
+"..."` are equivalent).
+
+On resume, explicit `--provider`/`--model` override the saved session. If you
+change the provider without a model, the new provider's default model is used.
 
 `--extended-thinking` is a request capability: it sends the provider's `thinking`
 parameter and requires the selected provider/model to declare `supports_thinking`.
@@ -88,9 +142,9 @@ so `cli-agent --provider deepseek` requests thinking without extra flags.
 the model think. Use a reasoning-capable model; for DeepSeek, `deepseek-flash`
 (not `deepseek-chat`) produces reasoning.
 
-`-p` exits `0` only when the turn ends normally. A refusal, provider error, or
+`run` exits `0` only when the turn ends normally. A refusal, provider error, or
 `--max-turns` cutoff exits `2`, and the stop reason is written to stderr. Retries are
-announced too (inline in the REPL, on stderr in print mode); if an attempt had already
+announced too (inline in the REPL, on stderr in one-shot mode); if an attempt had already
 streamed text, the notice says that the earlier text is stale rather than silently
 splicing two partial answers together.
 
@@ -119,6 +173,8 @@ out of scope, and an explicit `permissions.allow` rule still wins.
 Sessions, memory, and session spill files live under
 `$XDG_DATA_HOME/cli-agent/projects/<project-id>/`. Project instructions are read from
 `AGENTS.md` and `.agents/`; `cli-agent` does not reuse `.claude/` or `CLAUDE.md`.
+`@include` paths in project instructions are restricted to the workspace; includes in
+the global config `AGENTS.md` are restricted to the config directory.
 
 ## Learn
 
@@ -173,9 +229,13 @@ Implemented today:
   defaults (`thinking_by_default`), budget validation, and signed-reasoning replay
   after tool calls. The DeepSeek preset defaults to `deepseek-flash[1M]` with thinking
   on;
-- streaming reasoning display: on by default in the REPL, off in print mode;
-  `--thinking/--no-thinking` overrides it (print mode writes reasoning to stderr);
-- REPL, `-p/--print`, and `/help /clear /compact /model /auto /memory /cost /exit`.
+- streaming reasoning display: on by default in the REPL, off in one-shot mode;
+  `--thinking/--no-thinking` overrides it (one-shot mode writes reasoning to stderr);
+- REPL (`cli-agent`), one-shot (`cli-agent run`), and
+  `/help /clear /compact /model /auto /memory /cost /exit`;
+- headless `--output-format text|json|jsonl` with a stable result schema, clean
+  stdout, stderr diagnostics, and non-zero exit on incomplete turns.
+
 
 Deliberately deferred: MCP, external hook processes, subagents, teams, worktrees,
 cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, plan

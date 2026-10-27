@@ -149,3 +149,35 @@ def test_memory_guidance_appears_when_memory_is_enabled(tmp_path: Path) -> None:
 def test_memory_section_is_absent_when_memory_is_disabled(tmp_path: Path) -> None:
     context = replace(_context(tmp_path), memory_enabled=False)
     assert "memory" not in [section.name for section in PromptBuilder().build(context)]
+
+
+def test_project_include_cannot_escape_workspace(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (tmp_path / "secret.txt").write_text("TOP SECRET", encoding="utf-8")
+    (project / "AGENTS.md").write_text(
+        "@../secret.txt\n@/etc/passwd\nLocal rule.\n", encoding="utf-8"
+    )
+    text = load_project_instructions(project)
+    assert "TOP SECRET" not in text
+    assert "root:" not in text
+    assert "include denied" in text
+    assert "Local rule." in text
+
+
+def test_global_include_is_limited_to_config_dir(tmp_path: Path) -> None:
+    global_dir = tmp_path / "global"
+    global_dir.mkdir()
+    (global_dir / "notes.md").write_text("Global notes", encoding="utf-8")
+    (global_dir / "AGENTS.md").write_text(
+        "@notes.md\n@../outside.md\n", encoding="utf-8"
+    )
+    (tmp_path / "outside.md").write_text("Outside secret", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+
+    text = load_project_instructions(project, global_dir / "AGENTS.md")
+    assert "Global notes" in text
+    assert "Outside secret" not in text
+    assert "include denied" in text
+
