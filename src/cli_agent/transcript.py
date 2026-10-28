@@ -44,6 +44,9 @@ class Transcript:
     def replace(self, messages: Iterable[Message]) -> None:
         self._messages = list(messages)
 
+    def truncate(self, count: int) -> None:
+        self._messages = self._messages[: max(0, count)]
+
     def clear(self) -> None:
         self._messages.clear()
 

@@ -88,9 +88,13 @@ same `AgentRuntime`:
 - recent chats read from the project's session directory, newest activity first;
   opening one goes through the normal resume path and creates a fresh runtime;
 - drag the sidebar edge to resize it; right-click (or use the ⋯ button on touch) to
-  rename, archive, or permanently delete a chat (including the open one; a fresh
-  chat opens first). Archived chats stay on disk under "Show archived" and can be
-  restored; rename/archive live in `meta.json`, not in the append-only transcript;
+  rename, archive, export, or permanently delete a chat (including the open one; a
+  fresh chat opens first). Archived chats stay on disk under "Show archived" and can
+  be restored; rename/archive live in `meta.json`, not in the append-only transcript;
+- paste, drop, or attach PNG/JPEG/GIF/WebP images (four per message, 5 MiB each);
+  edit any user message and resend (the tail is rewound), or regenerate the last
+  answer; search chats by title and message content, export the current chat as
+  Markdown or JSON, and open the keyboard-shortcuts panel with `Ctrl/⌘ + /`;
 - "New chat" creates a new session instead of clearing the current one;
 - cancellation stops the running turn through the runtime, not by killing the server.
 
@@ -99,9 +103,12 @@ Streaming uses server-sent events. Each frame is a JSON object with a `type`:
 `permission_request`, `usage`, `context`, `notice`, `retry`, `error`, `cancelled`,
 and `done`.
 
-The server binds to `127.0.0.1` by default and has **no authentication**. It warns on a
-non-local host, but you should still put an authenticated proxy in front before
-exposing it. The page ships with a strict CSP and makes no external requests.
+The server binds to `127.0.0.1` by default. When bound to a non-loopback host it
+generates a random API token and prints a URL containing `?token=…`; use `--token`
+to choose one explicitly. The token is sent in `X-CLI-Agent-Token` and never logged
+by the bundled server. The page ships with a strict CSP and makes no external
+requests. Pair the token with an authenticated proxy if a wider network can reach
+the port.
 
 ## Headless output
 
@@ -304,7 +311,11 @@ the display flag still controls whether it is shown.
 ```bash
 uv sync --extra dev
 uv run pytest
+uv run pytest --cov=cli_agent --cov-report=term-missing
 uv run pytest tests/e2e -q   # skipped unless CLI_AGENT_E2E_PROVIDER is set
 uv run ruff check src tests
 uv run mypy src
 ```
+
+CI runs lint, types, tests with a 75% overall coverage floor, and a manual
+`workflow_dispatch` live-provider job (`DEEPSEEK_API_KEY` secret).

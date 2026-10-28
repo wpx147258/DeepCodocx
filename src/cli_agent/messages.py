@@ -7,7 +7,7 @@ translated in ``providers/`` and nowhere else.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -104,11 +104,20 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def user_message(text: str, *, id: str | None = None) -> Message:
+def user_message(
+    text: str,
+    *,
+    id: str | None = None,
+    images: Sequence[ImageBlock] = (),
+) -> Message:
+    content: list[TextBlock | ImageBlock] = []
+    if text or not images:
+        content.append(TextBlock(text))
+    content.extend(images)
     return Message(
         id=id or new_id(),
         role="user",
-        content=(TextBlock(text),),
+        content=tuple(content),
         created_at=now_iso(),
     )
 

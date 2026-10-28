@@ -58,7 +58,9 @@
   usage, or bypasses permission policy. Browser permission prompts fail closed when
   the client disappears or times out. Session switching closes the old runtime and
   rebuilds through `assembly.py`; the SSE event names are a public surface like JSONL.
-  Serve the page with a strict CSP and keep the default loopback bind.
+  Serve the page with a strict CSP and keep the default loopback bind. Non-local
+  binds require the API token; never disable it silently. UI-only preferences (sidebar
+  width, search text, theme) stay client-side; chat mutations go through the API.
 - UI-only session state (custom title, archived flag) lives in `meta.json` and is
   changed atomically; never rewrite `session.jsonl` for display concerns, because that
   would invalidate the prompt cache. Archive is reversible; delete removes the session

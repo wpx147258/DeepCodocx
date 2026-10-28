@@ -200,6 +200,19 @@ class SessionStore:
             return
         self._append({"v": SCHEMA_VERSION, "type": "clear", "at": now_iso()})
 
+    def append_rewind(self, keep: int) -> None:
+        """Persist a truncation of the transcript before ``keep`` messages."""
+        if not self.persist:
+            return
+        self._append(
+            {
+                "v": SCHEMA_VERSION,
+                "type": "rewind",
+                "keep": max(0, int(keep)),
+                "at": now_iso(),
+            }
+        )
+
     def append_permission_mode(self, mode: str, auto_previous: str | None) -> None:
         if not self.persist:
             return
@@ -342,6 +355,19 @@ class SessionStore:
                 except (ValueError, TypeError, OverflowError) as exc:
                     logger.warning(
                         "skipping invalid usage record at line %d: %s", index + 1, exc
+                    )
+                    degraded = True
+            elif record_type == "rewind":
+                keep = record.get("keep")
+                if (
+                    isinstance(keep, int)
+                    and not isinstance(keep, bool)
+                    and 0 <= keep <= len(messages)
+                ):
+                    del messages[keep:]
+                else:
+                    logger.warning(
+                        "ignoring invalid rewind record at line %d", index + 1
                     )
                     degraded = True
             elif record_type == "clear":

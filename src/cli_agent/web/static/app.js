@@ -2,6 +2,20 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+
+  const initialUrl = new URL(window.location.href);
+  let accessToken = initialUrl.searchParams.get("token") || "";
+  if (accessToken) {
+    try { sessionStorage.setItem("cli-agent-token", accessToken); } catch (_) { /* ignore */ }
+    initialUrl.searchParams.delete("token");
+    window.history.replaceState({}, "", initialUrl.pathname + initialUrl.search + initialUrl.hash);
+  } else {
+    try { accessToken = sessionStorage.getItem("cli-agent-token") || ""; } catch (_) { accessToken = ""; }
+  }
+  function authHeaders() {
+    return accessToken ? { "X-CLI-Agent-Token": accessToken } : {};
+  }
+
   const state = {
     data: null,
     busy: false,
@@ -15,6 +29,10 @@
     sessions: [],
     sidebarWidth: 268,
     archivedOpen: false,
+    attachments: [],
+    editing: null,
+    searchQuery: "",
+    searchTimer: null,
   };
 
   // ------------------------------------------------------------------ utils
@@ -22,7 +40,7 @@
   function api(path, body) {
     const options = {
       method: body === undefined ? "GET" : "POST",
-      headers: {},
+      headers: { ...authHeaders() },
     };
     if (body !== undefined) {
       options.headers["Content-Type"] = "application/json";
@@ -141,6 +159,23 @@
         persist: true,
       });
     });
+  }
+
+  function openShortcuts() {
+    if (!$("permission").hidden || !$("dialog").hidden) return;
+    $("shortcuts").hidden = false;
+    document.querySelector(".app").inert = true;
+    setTimeout(() => $("shortcuts-close").focus(), 30);
+  }
+
+  function closeShortcuts() {
+    $("shortcuts").hidden = true;
+    document.querySelector(".app").inert = false;
+  }
+
+  function toggleShortcuts() {
+    if ($("shortcuts").hidden) openShortcuts();
+    else closeShortcuts();
   }
 
   function setSidebar(open) {
@@ -334,7 +369,7 @@
     return texts.trim() ? texts : "";
   }
 
-  function addUserMessage(content) {
+  function addUserMessage(content, messageId = null) {
     const text = renderTextBlocks(content);
     const images = content.filter((block) => block.type === "image");
     if (!text.trim() && !images.length) return;
@@ -343,12 +378,19 @@
     if (text.trim()) body.appendChild(h("div", "bubble", text));
     for (const image of images) {
       const img = document.createElement("img");
+      img.className = "bubble-image";
       img.alt = "attached image";
       img.src = `data:${image.media_type};base64,${image.data}`;
-      img.style.maxWidth = "260px";
-      img.style.borderRadius = "12px";
-      img.style.marginTop = "6px";
       body.appendChild(img);
+    }
+    if (messageId) {
+      const actions = h("div", "msg-actions");
+      const edit = h("button", "msg-action", "Edit");
+      edit.type = "button";
+      edit.title = "Edit and resend";
+      edit.addEventListener("click", () => beginEdit(messageId, content));
+      actions.appendChild(edit);
+      body.appendChild(actions);
     }
     row.appendChild(body);
     $("messages").appendChild(row);
@@ -492,6 +534,8 @@
     // Assistant messages separated only by tool results belong to one visual
     // turn: keep a single avatar and segment list for them.
     let shell = null;
+    let lastShell = null;
+    let lastRole = null;
     let cards = new Map();
     for (const message of messages) {
       const results = message.content.filter((block) => block.type === "tool_result");
@@ -502,14 +546,27 @@
           cards = new Map();
         }
         renderAssistantContent(shell, message.content, cards);
+        lastShell = shell;
+        lastRole = "assistant";
       } else if (results.length && !text.trim() && shell) {
         for (const result of results) {
           finishToolCard(cards.get(result.tool_use_id), result, null);
         }
       } else {
         shell = null;
-        addUserMessage(message.content);
+        lastShell = null;
+        lastRole = "user";
+        addUserMessage(message.content, message.id);
       }
+    }
+    if (lastRole === "assistant" && lastShell) {
+      const actions = h("div", "turn-actions");
+      const regenerate = h("button", "turn-action", "Regenerate");
+      regenerate.type = "button";
+      regenerate.title = "Regenerate the last response";
+      regenerate.addEventListener("click", regenerateLastTurn);
+      actions.appendChild(regenerate);
+      lastShell.body.appendChild(actions);
     }
     updateEmptyState();
     updateTitle(messages);
@@ -533,11 +590,18 @@
     }
   }
 
-  function createTurn(userText) {
-    if ($("chat-title").textContent === "New conversation") {
+  function createTurn(userText, images = [], { appendUser = true } = {}) {
+    if (appendUser && userText && $("chat-title").textContent === "New conversation") {
       $("chat-title").textContent = truncate(userText, 48);
     }
-    addUserMessage([{ type: "text", text: userText }]);
+    if (appendUser) {
+      const blocks = [];
+      if (userText) blocks.push({ type: "text", text: userText });
+      for (const image of images) {
+        blocks.push({ type: "image", media_type: image.media_type, data: image.data });
+      }
+      addUserMessage(blocks);
+    }
     const shell = assistantShell();
     shell.row.classList.add("streaming");
     const turn = {
@@ -752,13 +816,40 @@
 
   async function sendMessage(text) {
     if (state.busy) return;
+    const images = state.attachments.map((image) => ({
+      media_type: image.media_type,
+      data: image.data,
+    }));
+    const editing = state.editing;
+    if (editing) {
+      state.busy = true;
+      updateComposer();
+      try {
+        const data = await api("/api/rewind", { message_id: editing });
+        applyState(data, { render: true });
+      } catch (error) {
+        state.busy = false;
+        updateComposer();
+        toast(error.message);
+        return;
+      }
+      state.busy = false;
+      state.editing = null;
+      $("editing-bar").hidden = true;
+    }
+    $("input").value = "";
+    clearAttachments();
+    saveDraft();
+    autoGrow();
+    await runChat({ text, images, appendUser: true });
+  }
+
+  async function runChat({ text = null, images = [], appendUser = true, continueFlag = false }) {
+    if (state.busy) return;
     state.busy = true;
     state.stopping = false;
     updateComposer();
-    const turn = createTurn(text);
-    $("input").value = "";
-    saveDraft();
-    autoGrow();
+    const turn = createTurn(text, images, { appendUser });
     state.stick = true;
     scrollIfSticky(true);
 
@@ -768,8 +859,8 @@
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(continueFlag ? { continue: true } : { text, images }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -806,9 +897,74 @@
       updateComposer();
       $("input").focus();
       hidePermission(true);
-      refreshState();
-      refreshSessions();
+      const canonical = sawDone && !["error", "cancelled"].includes(turn.stopReason || "");
+      const meta = {
+        usage: turn.usage,
+        stopReason: turn.stopReason,
+        elapsed: turn.elapsed,
+      };
+      await refreshState({ render: canonical });
+      if (canonical) attachLastTurnMeta(meta);
+      await refreshSessions();
     }
+  }
+
+  function attachLastTurnMeta(meta) {
+    const shells = $("messages").querySelectorAll(".msg-assistant");
+    const shell = shells[shells.length - 1];
+    if (!shell) return;
+    const body = shell.querySelector(".msg-body");
+    const old = body.querySelector(".turn-meta");
+    const next = buildMeta(meta);
+    if (old) old.replaceWith(next);
+    else body.appendChild(next);
+  }
+
+  async function regenerateLastTurn() {
+    if (state.busy) { toast("Stop the current turn first."); return; }
+    state.busy = true;
+    state.stopping = false;
+    updateComposer();
+    try {
+      const data = await api("/api/rewind", { last_user: true });
+      applyState(data, { render: true });
+    } catch (error) {
+      state.busy = false;
+      updateComposer();
+      toast(error.message);
+      return;
+    }
+    state.busy = false;
+    await runChat({ appendUser: false, continueFlag: true });
+  }
+
+  function beginEdit(messageId, content) {
+    if (state.busy) { toast("Stop the current turn first."); return; }
+    const text = renderTextBlocks(content);
+    const images = content.filter((block) => block.type === "image");
+    state.editing = messageId;
+    $("input").value = text;
+    state.attachments = images.map((image) => ({
+      media_type: image.media_type,
+      data: image.data,
+      url: `data:${image.media_type};base64,${image.data}`,
+      name: "image",
+    }));
+    renderAttachments();
+    $("editing-bar").hidden = false;
+    autoGrow();
+    updateComposer();
+    $("input").focus();
+  }
+
+  function cancelEdit() {
+    state.editing = null;
+    $("editing-bar").hidden = true;
+    $("input").value = "";
+    clearAttachments();
+    autoGrow();
+    updateComposer();
+    $("input").focus();
   }
 
   async function stopTurn() {
@@ -970,10 +1126,17 @@
     $("chat-title").textContent = text ? truncate(text, 48) : "New conversation";
   }
 
-  async function refreshState() {
+  async function refreshState({ render = false } = {}) {
+    const box = $("transcript");
+    const stick = nearBottom();
+    const fromBottom = box.scrollHeight - box.scrollTop;
     try {
       const data = await api("/api/bootstrap");
-      applyState(data);
+      applyState(data, { render });
+      if (render) {
+        if (stick) scrollIfSticky(true);
+        else box.scrollTop = box.scrollHeight - fromBottom;
+      }
     } catch (_) {
       $("connection-dot").className = "brand-dot offline";
     }
@@ -999,8 +1162,12 @@
     item.title = session.title || "Untitled chat";
     if (session.current) item.setAttribute("aria-current", "true");
     item.appendChild(h("span", "chat-title", session.title || "Untitled chat"));
-    const meta = [session.model, formatWhen(session.created_at)].filter(Boolean).join(" · ");
-    if (meta) item.appendChild(h("span", "chat-meta", meta));
+    if (session.snippet) {
+      item.appendChild(h("span", "chat-snippet", session.snippet));
+    } else {
+      const meta = [session.model, formatWhen(session.created_at)].filter(Boolean).join(" · ");
+      if (meta) item.appendChild(h("span", "chat-meta", meta));
+    }
     item.addEventListener("click", () => openSession(session));
     item.addEventListener("contextmenu", (event) => {
       event.preventDefault();
@@ -1027,7 +1194,9 @@
     const active = state.sessions.filter((session) => !session.archived);
     const archived = state.sessions.filter((session) => session.archived);
     if (!active.length && !archived.length) {
-      list.appendChild(h("div", "chat-empty", "No saved chats yet."));
+      list.appendChild(
+        h("div", "chat-empty", state.searchQuery ? "No chats match." : "No saved chats yet.")
+      );
       return;
     }
     if (!active.length) {
@@ -1052,6 +1221,93 @@
     }
   }
 
+  function downloadFile(name, contents, type) {
+    const blob = new Blob([contents], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function exportChat(format) {
+    const data = state.data;
+    if (!data || !(data.messages || []).length) {
+      toast("This chat is empty.");
+      return;
+    }
+    const slug = (data.title || "cli-agent-chat")
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "chat";
+    const date = new Date().toISOString().slice(0, 10);
+    if (format === "json") {
+      const payload = {
+        version: data.version,
+        session_id: data.session_id,
+        title: data.title,
+        provider: data.provider,
+        model: data.model,
+        messages: data.messages,
+      };
+      downloadFile(`${slug}-${date}.json`, JSON.stringify(payload, null, 2), "application/json");
+      toast("Chat exported as JSON.");
+      return;
+    }
+    const lines = [`# ${data.title || "cli-agent chat"}`, ""];
+    const textOf = (content) => content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    for (const message of data.messages) {
+      const text = textOf(message.content);
+      const images = message.content.filter((block) => block.type === "image");
+      const tools = message.content.filter((block) => block.type === "tool_use");
+      const results = message.content.filter((block) => block.type === "tool_result");
+      if (message.role === "user" && !text.trim() && !images.length && results.length) {
+        for (const result of results) {
+          const output = (result.content || [])
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n");
+          lines.push(`### Tool result${result.is_error ? " (error)" : ""}`, "", "```text", output, "```", "");
+        }
+        continue;
+      }
+      if (text.trim()) {
+        lines.push(message.role === "assistant" ? "## Assistant" : "## User", "", text.trim(), "");
+      }
+      for (const image of images) {
+        lines.push(`_[image: ${image.media_type}]_`, "");
+      }
+      for (const tool of tools) {
+        lines.push(
+          `**Tool: ${tool.name}**`,
+          "",
+          "```json",
+          JSON.stringify(tool.input || {}, null, 2),
+          "```",
+          ""
+        );
+      }
+      if (message.role === "assistant") {
+        const reasoning = message.content
+          .filter((block) => block.type === "reasoning")
+          .map((block) => block.text)
+          .join("\n");
+        if (reasoning.trim()) {
+          lines.push("<details><summary>Thinking</summary>", "", reasoning.trim(), "", "</details>", "");
+        }
+      }
+    }
+    downloadFile(`${slug}-${date}.md`, lines.join("\n"), "text/markdown");
+    toast("Chat exported as Markdown.");
+  }
+
   function closeChatMenu() {
     $("chat-menu").hidden = true;
     $("chat-menu").textContent = "";
@@ -1072,6 +1328,10 @@
     };
     if (!session.current) add("Open", () => openSession(session));
     add("Rename", () => openRenameDialog(session));
+    if (session.current) {
+      add("Export Markdown", () => exportChat("markdown"));
+      add("Export JSON", () => exportChat("json"));
+    }
     add(session.archived ? "Unarchive" : "Archive", () =>
       setArchived(session, !session.archived)
     );
@@ -1212,15 +1472,23 @@
   }
 
   async function refreshSessions() {
+    const requested = state.searchQuery;
+    const suffix = requested ? `?q=${encodeURIComponent(requested)}` : "";
     try {
-      const data = await api("/api/sessions");
+      const data = await api(`/api/sessions${suffix}`);
+      if (requested !== state.searchQuery) return;
       renderSessions(data.sessions);
     } catch (_) { /* the chat list is best-effort */ }
   }
 
   async function openSession(session) {
     if (state.busy) { toast("Stop the current turn first."); return; }
-    if (session.current) { setSidebar(false); return; }
+    if (state.editing) cancelEdit();
+    if (state.searchQuery) {
+      state.searchQuery = "";
+      $("chat-search").value = "";
+    }
+    if (session.current) { setSidebar(false); await refreshSessions(); return; }
     try {
       const data = await api("/api/open", { id: session.id });
       applyState(data, { render: true });
@@ -1234,9 +1502,15 @@
 
   async function newChat() {
     if (state.busy) { toast("Stop the current turn first."); return; }
+    if (state.editing) cancelEdit();
+    if (state.searchQuery) {
+      state.searchQuery = "";
+      $("chat-search").value = "";
+    }
     if (state.data && (state.data.messages || []).length === 0) {
       setSidebar(false);
       toast("This is already a new chat.");
+      await refreshSessions();
       return;
     }
     try {
@@ -1302,6 +1576,94 @@
     }
   }
 
+  // --------------------------------------------------------------- attachments
+
+  const MAX_ATTACHMENTS = 4;
+  const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+  const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+  function renderAttachments() {
+    const strip = $("attachments");
+    strip.textContent = "";
+    strip.hidden = state.attachments.length === 0;
+    state.attachments.forEach((image, index) => {
+      const item = h("div", "attachment");
+      const preview = document.createElement("img");
+      preview.src = image.url;
+      preview.alt = image.name || "attachment";
+      const remove = h("button", "", "×");
+      remove.type = "button";
+      remove.title = "Remove image";
+      remove.setAttribute("aria-label", "Remove image");
+      remove.addEventListener("click", () => {
+        state.attachments.splice(index, 1);
+        renderAttachments();
+        updateComposer();
+      });
+      item.append(preview, remove);
+      strip.appendChild(item);
+    });
+  }
+
+  function clearAttachments() {
+    state.attachments = [];
+    renderAttachments();
+    updateComposer();
+  }
+
+  function readImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("could not read image"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function addImageFiles(files) {
+    if (state.data && state.data.supports_images === false) {
+      toast("The active model does not accept image input.");
+      return;
+    }
+    for (const file of Array.from(files || [])) {
+      if (state.attachments.length >= MAX_ATTACHMENTS) {
+        toast(`At most ${MAX_ATTACHMENTS} images per message.`);
+        break;
+      }
+      if (!IMAGE_TYPES.has(file.type)) {
+        toast(`${file.name || "File"}: use PNG, JPEG, GIF, or WebP.`);
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast(`${file.name || "Image"} is larger than 5 MiB.`);
+        continue;
+      }
+      const currentBytes = state.attachments.reduce(
+        (total, image) => total + Math.ceil((image.data.length * 3) / 4),
+        0
+      );
+      if (currentBytes + file.size > 12 * 1024 * 1024) {
+        toast("Images are larger than 12 MiB in total.");
+        break;
+      }
+      try {
+        const url = await readImage(file);
+        const comma = url.indexOf(",");
+        if (comma < 0) continue;
+        state.attachments.push({
+          media_type: file.type,
+          data: url.slice(comma + 1),
+          url,
+          name: file.name || "image",
+        });
+      } catch (error) {
+        toast(error.message || "Could not read image.");
+      }
+    }
+    renderAttachments();
+    updateComposer();
+  }
+
   // ------------------------------------------------------------------ composer
 
   function autoGrow() {
@@ -1316,7 +1678,7 @@
     const input = $("input");
     composer.classList.toggle("busy", state.busy);
     input.disabled = state.busy;
-    send.disabled = state.busy ? false : !input.value.trim();
+    send.disabled = state.busy ? false : !input.value.trim() && state.attachments.length === 0;
     send.setAttribute("aria-label", state.busy ? (state.stopping ? "Stopping" : "Stop generating") : "Send message");
   }
 
@@ -1356,11 +1718,49 @@
     const transcript = $("transcript");
     transcript.addEventListener("scroll", () => { state.stick = nearBottom(); });
 
+    const composer = $("composer");
+    const imageInput = $("image-input");
+    $("attach").addEventListener("click", () => imageInput.click());
+    imageInput.addEventListener("change", () => {
+      addImageFiles(imageInput.files);
+      imageInput.value = "";
+    });
+    $("input").addEventListener("paste", (event) => {
+      const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+        file.type.startsWith("image/"));
+      if (files.length) {
+        event.preventDefault();
+        addImageFiles(files);
+      }
+    });
+    document.addEventListener("paste", (event) => {
+      if (event.target === $("input")) return;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) return;
+      const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+        file.type.startsWith("image/"));
+      if (files.length) {
+        event.preventDefault();
+        addImageFiles(files);
+      }
+    });
+    composer.addEventListener("dragover", (event) => {
+      if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
+      event.preventDefault();
+      composer.classList.add("dragging");
+    });
+    composer.addEventListener("dragleave", () => composer.classList.remove("dragging"));
+    composer.addEventListener("drop", (event) => {
+      if (!event.dataTransfer?.files?.length) return;
+      event.preventDefault();
+      composer.classList.remove("dragging");
+      addImageFiles(event.dataTransfer.files);
+    });
+
     $("composer").addEventListener("submit", (event) => {
       event.preventDefault();
       if (state.busy) { stopTurn(); return; }
       const text = $("input").value.trim();
-      if (text) sendMessage(text);
+      if (text || state.attachments.length) sendMessage(text);
     });
 
     $("input").addEventListener("input", () => {
@@ -1385,6 +1785,16 @@
     });
     $("theme-toggle").addEventListener("click", () => {
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    });
+    $("shortcuts-button").addEventListener("click", openShortcuts);
+    $("shortcuts-close").addEventListener("click", closeShortcuts);
+    $("shortcuts").addEventListener("click", (event) => {
+      if (event.target === $("shortcuts")) closeShortcuts();
+    });
+    $("chat-search").addEventListener("input", (event) => {
+      state.searchQuery = event.target.value.trim();
+      clearTimeout(state.searchTimer);
+      state.searchTimer = setTimeout(refreshSessions, 220);
     });
 
     $("menu").addEventListener("click", () => setSidebar(true));
@@ -1422,6 +1832,7 @@
     });
 
     $("notice-close").addEventListener("click", () => { $("notice-bar").hidden = true; });
+    $("editing-cancel").addEventListener("click", cancelEdit);
 
     $("dialog-cancel").addEventListener("click", closeDialog);
     $("dialog-confirm").addEventListener("click", submitDialog);
@@ -1462,6 +1873,34 @@
         if (event.key === "Escape") { event.preventDefault(); closeChatMenu(); }
         return;
       }
+      if (!$("shortcuts").hidden) {
+        if (event.key === "Escape") { event.preventDefault(); closeShortcuts(); }
+        return;
+      }
+      const command = event.metaKey || event.ctrlKey;
+      if (command && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSidebar(true);
+        $("chat-search").focus();
+        return;
+      }
+      if (event.altKey && !command && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        newChat();
+        return;
+      }
+      if (command && (event.key === "/" || event.key === "?")) {
+        event.preventDefault();
+        toggleShortcuts();
+        return;
+      }
+      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName) ||
+        event.target.isContentEditable;
+      if (event.key === "?" && !typing) {
+        event.preventDefault();
+        toggleShortcuts();
+        return;
+      }
       if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
         event.preventDefault();
         setSidebar(false);
@@ -1483,7 +1922,14 @@
       await refreshSessions();
     } catch (error) {
       $("connection-dot").className = "brand-dot offline";
-      systemNote(`Cannot reach cli-agent: ${error.message}`, "error");
+      if (/unauthorized/i.test(error.message)) {
+        systemNote(
+          "Unauthorized: open the URL printed by the server; it includes the access token.",
+          "error"
+        );
+      } else {
+        systemNote(`Cannot reach cli-agent: ${error.message}`, "error");
+      }
     }
     autoGrow();
     updateComposer();

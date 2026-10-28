@@ -29,6 +29,7 @@ from .events import (
     AgentUsage,
 )
 from .messages import (
+    ImageBlock,
     Message,
     StopReason,
     TextBlock,
@@ -152,6 +153,10 @@ class AgentRuntime:
         return self._deps.profile.model
 
     @property
+    def supports_images(self) -> bool:
+        return self._deps.profile.supports_images
+
+    @property
     def provider_name(self) -> str:
         return self._deps.profile.provider_name
 
@@ -199,11 +204,16 @@ class AgentRuntime:
             return False
         return self._deps.memory.forget(name)
 
-    async def run_turn(self, text: str | None = None) -> AsyncIterator[AgentEvent]:
-        if text is not None:
-            message = user_message(text)
+    async def run_turn(
+        self,
+        text: str | None = None,
+        *,
+        images: Sequence[ImageBlock] = (),
+    ) -> AsyncIterator[AgentEvent]:
+        if text is not None or images:
+            message = user_message(text or "", images=images)
             self._append(message)
-            self._active_request = text
+            self._active_request = text or ""
         elif not self._deps.transcript.messages:
             yield AgentNotice("Nothing to continue.")
             return
@@ -301,6 +311,51 @@ class AgentRuntime:
             recovery.continuations = 0
 
         yield AgentTurnFinished("max_turns", self._usage)
+
+    async def rewind_to(self, message_id: str) -> None:
+        """Drop a user message and everything after it (for edit-and-resend)."""
+        index = self._deps.transcript.index_of(message_id)
+        if index is None:
+            raise ValueError("message not found")
+        message = self._deps.transcript.messages[index]
+        if message.role != "user":
+            raise ValueError("only user messages can be edited")
+        self._rewind(index)
+
+    async def rewind_last_user_turn(self) -> None:
+        """Keep the latest user text and drop the assistant/tool tail."""
+        messages = self._deps.transcript.messages
+        index = next(
+            (
+                position
+                for position in range(len(messages) - 1, -1, -1)
+                if messages[position].role == "user"
+                and messages[position].text().strip()
+            ),
+            None,
+        )
+        if index is None:
+            raise ValueError("no user message to regenerate")
+        self._rewind(index + 1)
+
+    def _rewind(self, keep: int) -> None:
+        messages = self._deps.transcript.messages
+        keep = max(0, min(keep, len(messages)))
+        self._deps.transcript.truncate(keep)
+        self._deps.session.append_rewind(keep)
+        self._deps.context.set_checkpoint(None)
+        self._deps.session.save_context(None)
+        self._last_request_tokens = 0
+        self._last_usage = Usage()
+        previous = next(
+            (
+                message.text()
+                for message in reversed(messages[:keep])
+                if message.role == "user" and message.text().strip()
+            ),
+            "",
+        )
+        self._active_request = previous
 
     async def compact(self) -> AsyncIterator[AgentEvent]:
         prepared = await self._deps.context.prepare(

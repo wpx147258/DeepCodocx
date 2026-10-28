@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -189,6 +190,7 @@ def _run_web(
     host: str,
     port: int,
     open_browser: bool,
+    token: str | None = None,
 ) -> int:
     from .web.server import WebAsker, serve
 
@@ -215,10 +217,11 @@ def _run_web(
 
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(
-            "warning: the web UI has no authentication; it is exposed to the "
-            f"network on {host}",
+            "warning: the web UI is exposed beyond loopback; API access requires "
+            "the printed token.",
             file=sys.stderr,
         )
+        token = token or secrets.token_urlsafe(24)
     serve(
         bundle,
         asker,
@@ -226,6 +229,7 @@ def _run_web(
         port=port,
         open_browser=open_browser,
         factory=session_factory,
+        token=token,
     )
     return 0
 
@@ -305,12 +309,21 @@ def run(ctx: click.Context, **common: Any) -> None:
     show_default=True,
     help="Open the browser once the server is listening.",
 )
+@click.option(
+    "--token",
+    default=None,
+    help=(
+        "Require this token for API requests. Non-loopback hosts get a random "
+        "token automatically."
+    ),
+)
 @click.pass_context
 def web(
     ctx: click.Context,
     host: str,
     port: int,
     open_browser: bool,
+    token: str | None,
     **common: Any,
 ) -> None:
     """Serve the local chat client in a browser."""
@@ -321,5 +334,6 @@ def web(
             host=host,
             port=port,
             open_browser=open_browser,
+            token=token,
         )
     )

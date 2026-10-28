@@ -453,3 +453,47 @@ def test_new_session_wraps_header_append_failure(tmp_path: Path, monkeypatch) ->
         SessionStore.new(
             paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
         )
+
+
+def test_rewind_record_truncates_on_resume(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    first = user_message("first")
+    second = user_message("second")
+    third = user_message("third")
+    store.append_message(first)
+    store.append_message(second)
+    store.append_rewind(1)
+    store.append_message(third)
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert [message.text() for message in loaded.messages] == [
+            "first",
+            "third",
+        ]
+        assert not loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_invalid_rewind_record_marks_degraded(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("kept"))
+    store.append_rewind(99)
+    session_id = store.session_id
+    store.close()
+
+    resumed, loaded = SessionStore.resume(paths, session_id)
+    try:
+        assert loaded.messages[0].text() == "kept"
+        assert loaded.degraded
+    finally:
+        resumed.close()

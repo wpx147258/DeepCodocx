@@ -16,7 +16,7 @@ from cli_agent.events import (
     AgentToolFinished,
     AgentTurnFinished,
 )
-from cli_agent.messages import Usage
+from cli_agent.messages import ImageBlock, Usage
 from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from cli_agent.providers.base import TextDelta
 from cli_agent.tools.base import ToolContext, ToolResult, ToolSpec
@@ -683,4 +683,23 @@ async def test_cancel_during_permission_ask_closes_the_tool_pair(
     assert result.tool_use_id == "t1"
     assert result.is_error
     assert "cancelled" in result.content[0].text
+    await runtime.close()
+
+
+async def test_image_is_part_of_the_user_message(tmp_path: Path) -> None:
+    provider = FakeProvider([[text_response("seen")]])
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path)
+    image = ImageBlock("image/png", "aGVsbG8=")
+    await _consume(runtime, "look")
+    await runtime.close()
+
+    runtime, _ = make_runtime(FakeProvider([[text_response("seen")]]), tmp_path=tmp_path / "two")
+    events = [
+        event
+        async for event in runtime.run_turn("look", images=(image,))
+    ]
+    user = runtime.messages[0]
+    assert user.role == "user"
+    assert any(isinstance(block, ImageBlock) for block in user.content)
+    assert any(isinstance(event, AgentTurnFinished) for event in events)
     await runtime.close()

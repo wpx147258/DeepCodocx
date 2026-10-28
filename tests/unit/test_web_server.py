@@ -9,7 +9,7 @@ import pytest
 
 from cli_agent.assembly import RuntimeBundle
 from cli_agent.config import AppPaths, load_config
-from cli_agent.messages import user_message
+from cli_agent.messages import TextBlock, assistant_message, user_message
 from cli_agent.permissions.policy import PermissionRequest
 from cli_agent.providers.base import ModelProfile
 from cli_agent.session.meta import read_session_meta, update_session_meta
@@ -476,3 +476,170 @@ async def test_session_actions_protect_current_and_validate(client_factory) -> N
             "/api/sessions/rename", json={"id": "missing", "title": "   "}
         )
         assert empty.status_code == 404
+
+
+async def test_token_protects_api_but_not_the_page(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path, FakeProvider([]))
+    app = create_app(bundle, token="secret-token")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        page = await client.get("/")
+        assert page.status_code == 200
+        assert (await client.get("/static/app.js")).status_code == 200
+
+        denied = await client.get("/api/bootstrap")
+        assert denied.status_code == 401
+        wrong = await client.get(
+            "/api/bootstrap", headers={"X-CLI-Agent-Token": "nope"}
+        )
+        assert wrong.status_code == 401
+
+        allowed = await client.get(
+            "/api/bootstrap", headers={"X-CLI-Agent-Token": "secret-token"}
+        )
+        assert allowed.status_code == 200
+        via_query = await client.get("/api/bootstrap?token=secret-token")
+        assert via_query.status_code == 200
+    await bundle.runtime.close()
+
+
+PNG_DATA = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+    "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+async def test_chat_accepts_image_attachments(client_factory) -> None:
+    client, _, _ = await client_factory([[text_response("seen")]])
+    async with client:
+        response = await client.post(
+            "/api/chat",
+            json={
+                "text": "",
+                "images": [{"media_type": "image/png", "data": PNG_DATA}],
+            },
+        )
+        assert response.status_code == 200
+        state = (await client.get("/api/bootstrap")).json()
+    user = state["messages"][0]
+    assert user["role"] == "user"
+    assert any(block["type"] == "image" for block in user["content"])
+    assert state["title"] == "Image attachment"
+
+
+async def test_chat_rejects_invalid_images(client_factory) -> None:
+    client, _, _ = await client_factory([])
+    async with client:
+        bad_type = await client.post(
+            "/api/chat",
+            json={"text": "x", "images": [{"media_type": "text/plain", "data": "eA=="}]},
+        )
+        assert bad_type.status_code == 400
+        bad_data = await client.post(
+            "/api/chat",
+            json={"text": "x", "images": [{"media_type": "image/png", "data": "!!!"}]},
+        )
+        assert bad_data.status_code == 400
+        too_many = await client.post(
+            "/api/chat",
+            json={
+                "text": "x",
+                "images": [
+                    {"media_type": "image/png", "data": PNG_DATA}
+                    for _ in range(5)
+                ],
+            },
+        )
+        assert too_many.status_code == 400
+        empty = await client.post("/api/chat", json={"text": "", "images": []})
+        assert empty.status_code == 400
+
+
+async def test_regenerate_and_edit_flow(client_factory) -> None:
+    client, _, _ = await client_factory(
+        [
+            [text_response("first answer")],
+            [text_response("second answer")],
+            [text_response("edited answer")],
+        ]
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "original question"})
+        state = (await client.get("/api/bootstrap")).json()
+        user_id = state["messages"][0]["id"]
+
+        regenerated = await client.post("/api/rewind", json={"last_user": True})
+        assert regenerated.status_code == 200
+        assert [m["role"] for m in regenerated.json()["messages"]] == ["user"]
+
+        continued = await client.post("/api/chat", json={"continue": True})
+        assert continued.status_code == 200
+        state = (await client.get("/api/bootstrap")).json()
+        assert [m["role"] for m in state["messages"]] == ["user", "assistant"]
+        assert state["messages"][-1]["content"][0]["text"] == "second answer"
+
+        edited = await client.post("/api/rewind", json={"message_id": user_id})
+        assert edited.status_code == 200
+        assert edited.json()["messages"] == []
+
+        await client.post("/api/chat", json={"text": "edited question"})
+        state = (await client.get("/api/bootstrap")).json()
+        assert state["messages"][0]["content"][0]["text"] == "edited question"
+
+
+async def test_rewind_requires_a_valid_target(client_factory) -> None:
+    client, _, _ = await client_factory([])
+    async with client:
+        empty = await client.post("/api/rewind", json={"last_user": True})
+        assert empty.status_code == 400
+        missing = await client.post("/api/rewind", json={"message_id": "nope"})
+        assert missing.status_code == 400
+
+
+def test_session_search_matches_messages_and_titles(tmp_path: Path) -> None:
+    paths, first = _persisted_session(tmp_path, "alpha beta")
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message("unrelated question"))
+    store.append_message(assistant_message([TextBlock("the needle is here")]))
+    second = store.session_id
+    store.close()
+
+    message_hits = session_summaries(paths, current="x", query="NEEDLE")
+    assert [hit["id"] for hit in message_hits] == [second]
+    assert "needle" in message_hits[0]["snippet"].lower()
+
+    title_hits = session_summaries(paths, current="x", query="ALPHA")
+    assert [hit["id"] for hit in title_hits] == [first]
+
+    assert session_summaries(paths, current="x", query="absent") == []
+
+
+async def test_sessions_search_endpoint(client_factory, tmp_path: Path) -> None:
+    _, session_id = _persisted_session(tmp_path, "searchable phrase")
+    client, _, _ = await client_factory([])
+    async with client:
+        response = await client.get("/api/sessions", params={"q": "SEARCHABLE"})
+        assert response.status_code == 200
+        sessions = response.json()["sessions"]
+        assert [session["id"] for session in sessions] == [session_id]
+        assert "searchable" in sessions[0]["snippet"].lower()
+
+
+def test_image_only_session_gets_a_title(tmp_path: Path) -> None:
+    from cli_agent.messages import ImageBlock, user_message
+
+    paths = AppPaths.discover(tmp_path, env=_env(tmp_path))
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(
+        user_message("", images=(ImageBlock("image/png", PNG_DATA),))
+    )
+    session_id = store.session_id
+    store.close()
+    summaries = session_summaries(paths, current="x")
+    assert summaries[0]["id"] == session_id
+    assert summaries[0]["title"] == "Image attachment"

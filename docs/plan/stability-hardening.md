@@ -6,6 +6,34 @@
 
 ---
 
+## 0. 当前状态（2026-10-28）
+
+> 远端 `origin/main` 已是核心逻辑的主线。以下状态描述当前代码，而不是最初的计划。
+
+- **保留的本地加固**：S2（skill 边界）、S3（Bash 有界输出）、S4（损坏记录容错）、
+  S5（构建失败释放资源）、S9（短写回滚）、S10（max-turns 校验）。
+- **以远端逻辑为准，已回退**：S1（`always`/组合命令规则）、S6（部分输出不重试）、
+  S7（图片不读取 base64）、S8（`/clear` 重置 usage）、S11（摘要输出裁剪）。
+  远端对应设计分别是显式 allow 规则优先、带 `partial` 标记的重试、Read/adapter
+  降级、usage 持续累计、固定摘要预算。
+- **P2**：
+  - S12 Headless schema 版本：**未做**。
+  - S13 预留字段：`concurrency_safe` 与 `cacheable` 已由远端的并行工具和 prompt
+    caching 真正实现；`snapshot()` / `ToolInputError` 仍未使用。
+  - S14 Token 校准：**已由远端完成**（system/tools 计入估算，按 prompt tokens 校准）。
+  - S15 REPL 异步输入：**未做**；后台 extraction 已移除，优先级下降。
+  - S16 Windows Grep：**已修复**（`rsplit(":", 2)` + 回归测试）。
+- **本轮新增 P0**：摘要输入按 context budget 裁剪（`_trim_to_tokens`）；Web 非
+  loopback 访问自动要求 token；图片输入；编辑重发/重新生成；会话搜索/导出；
+  快捷键面板。
+- **测试基线**：当前 367+ 单测、整体覆盖率约 84%；CI 运行 ruff/mypy/pytest
+  并设置 75% 下限；DeepSeek live e2e 已通过（`workflow_dispatch` job 需要
+  `DEEPSEEK_API_KEY` secret）。
+- **仍未完成**：完整多 provider e2e 矩阵、S12、S15，以及“摘要输出小于 profile
+  上限”的通用适配。
+
+---
+
 ## 1. 目标
 
 这一阶段不增加新能力，目标是让现有能力在**异常输入、异常网络、恶意仓库、损坏会话、大输出**下仍然可预测：

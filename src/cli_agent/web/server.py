@@ -8,10 +8,12 @@ to the browser and fail closed when nobody answers.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
 import os
+import secrets
 import shutil
 import sys
 import threading
@@ -65,6 +67,10 @@ from ..session.paths import SessionPaths, list_session_ids
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024
+IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 PERMISSION_TIMEOUT_SECONDS = 600.0
 HEARTBEAT_SECONDS = 15.0
 _END = object()
@@ -205,6 +211,7 @@ class WebHost:
             "last_usage": _usage(runtime.last_usage),
             "messages": [_message(message) for message in runtime.messages],
             "models": _model_choices(self.bundle),
+            "supports_images": runtime.supports_images,
             "thinking": runtime.thinking is not None,
             "memory_enabled": self.bundle.config.memory_enabled,
             "resumed": self.bundle.resumed,
@@ -212,9 +219,14 @@ class WebHost:
             "degraded": self.bundle.degraded,
         }
 
-    async def _run_turn(self, text: str, queue: asyncio.Queue[Any]) -> None:
+    async def _run_turn(
+        self,
+        text: str | None,
+        images: tuple[ImageBlock, ...],
+        queue: asyncio.Queue[Any],
+    ) -> None:
         try:
-            async for event in self.runtime.run_turn(text):
+            async for event in self.runtime.run_turn(text, images=images):
                 await queue.put(_event(event))
         except asyncio.CancelledError:
             await queue.put({"type": "cancelled"})
@@ -246,13 +258,17 @@ class WebHost:
             await queue.put(_END)
 
     async def stream_turn(
-        self, text: str, request: Request
+        self,
+        text: str | None,
+        request: Request,
+        *,
+        images: tuple[ImageBlock, ...] = (),
     ) -> AsyncIterator[str]:
         if self.busy:
             raise TurnBusy
         queue: asyncio.Queue[Any] = asyncio.Queue()
         self._queue = queue
-        self._turn = asyncio.create_task(self._run_turn(text, queue))
+        self._turn = asyncio.create_task(self._run_turn(text, images, queue))
         disconnect = asyncio.create_task(_wait_for_disconnect(request))
         try:
             yield _sse(
@@ -460,32 +476,71 @@ def _title_from_messages(messages: tuple[Message, ...]) -> str:
     for message in messages:
         if message.role != "user":
             continue
-        text = "".join(
-            block.text for block in message.content if isinstance(block, TextBlock)
+        text = " ".join(
+            "".join(
+                block.text
+                for block in message.content
+                if isinstance(block, TextBlock)
+            ).split()
         )
-        text = " ".join(text.split())
         if text:
             return text[:120]
+        if any(isinstance(block, ImageBlock) for block in message.content):
+            return "Image attachment"
     return "New conversation"
 
 
+def _record_text(record: dict[str, Any]) -> str:
+    message = record.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+        elif block.get("type") == "tool_result":
+            for inner in block.get("content", []) or []:
+                if isinstance(inner, dict) and inner.get("type") == "text":
+                    parts.append(str(inner.get("text", "")))
+    return " ".join(" ".join(parts).split())
+
+
+def _snippet(text: str, query: str, width: int = 150) -> str:
+    index = text.casefold().find(query.casefold())
+    if index < 0:
+        return text[:width]
+    start = max(0, index - 55)
+    end = min(len(text), index + len(query) + 85)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return prefix + text[start:end].strip() + suffix
+
+
 def session_summaries(
-    app_paths: Any, *, current: str, limit: int = 50
+    app_paths: Any, *, current: str, limit: int = 50, query: str | None = None
 ) -> list[dict[str, Any]]:
-    """Recent sessions with a title derived from the first user message."""
+    """Recent sessions with titles and optional full-text search snippets."""
+    search = (query or "").strip().casefold()
     entries: list[tuple[float, dict[str, Any]]] = []
     for session_id in list_session_ids(app_paths)[:50]:
         paths = SessionPaths.for_session(app_paths, session_id)
         meta = read_session_meta(paths)
-        title = clean_title(meta.get("title")) or ""
+        custom_title = clean_title(meta.get("title"))
+        title = custom_title or ""
         archived = bool(meta.get("archived"))
         created_at = ""
         provider = ""
         model = ""
+        snippet = ""
         try:
             with paths.jsonl.open("r", encoding="utf-8") as handle:
                 for index, line in enumerate(handle):
-                    if index >= 500:
+                    if index >= (2_000 if search else 500):
                         break
                     try:
                         record = json.loads(line)
@@ -498,28 +553,36 @@ def session_summaries(
                         created_at = str(record.get("created_at", ""))
                         provider = str(record.get("provider", ""))
                         model = str(record.get("model", ""))
-                    elif kind == "clear" and not clean_title(meta.get("title")):
+                    elif kind == "clear" and not custom_title:
                         title = ""
-                    elif kind == "message" and not title:
+                    elif kind == "message":
+                        text = _record_text(record)
                         message = record.get("message")
-                        if not isinstance(message, dict) or message.get("role") != "user":
-                            continue
-                        content = message.get("content", [])
-                        if not isinstance(content, list):
-                            continue
-                        text = "".join(
-                            str(block.get("text", ""))
-                            for block in content
-                            if isinstance(block, dict) and block.get("type") == "text"
-                        ).strip()
-                        if text:
-                            title = " ".join(text.split())[:160]
-                            break
-                    if title and created_at:
+                        role = message.get("role") if isinstance(message, dict) else ""
+                        if not title and role == "user":
+                            if text:
+                                title = text[:160]
+                            else:
+                                content = (
+                                    message.get("content", [])
+                                    if isinstance(message, dict)
+                                    else []
+                                )
+                                if isinstance(content, list) and any(
+                                    isinstance(block, dict)
+                                    and block.get("type") == "image"
+                                    for block in content
+                                ):
+                                    title = "Image attachment"
+                        if search and not snippet and search in text.casefold():
+                            snippet = _snippet(text, search)
+                    if title and created_at and (not search or snippet):
                         break
         except OSError:
             continue
         if not title:
+            continue
+        if search and not snippet and search not in title.casefold():
             continue
         try:
             mtime = paths.jsonl.stat().st_mtime
@@ -536,6 +599,7 @@ def session_summaries(
                     "model": model,
                     "current": session_id == current,
                     "archived": archived,
+                    "snippet": snippet,
                 },
             )
         )
@@ -564,6 +628,37 @@ async def _security_headers(
 # ---------------------------------------------------------------------------
 
 
+def _images_from_payload(value: Any) -> tuple[ImageBlock, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("images must be a list")
+    if len(value) > MAX_IMAGES:
+        raise ValueError(f"at most {MAX_IMAGES} images are allowed")
+    images: list[ImageBlock] = []
+    total = 0
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each image must be an object")
+        media_type = str(item.get("media_type", ""))
+        data = str(item.get("data", ""))
+        if media_type not in IMAGE_TYPES:
+            raise ValueError(f"unsupported image type: {media_type or 'missing'}")
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("image data is not valid base64") from exc
+        if not raw:
+            raise ValueError("image data is empty")
+        if len(raw) > MAX_IMAGE_BYTES:
+            raise ValueError("an image is larger than 5 MiB")
+        total += len(raw)
+        if total > MAX_TOTAL_IMAGE_BYTES:
+            raise ValueError("images are larger than 12 MiB in total")
+        images.append(ImageBlock(media_type, data))
+    return tuple(images)
+
+
 async def _json_object(request: Request) -> dict[str, Any] | None:
     try:
         body = await request.json()
@@ -576,6 +671,7 @@ def create_app(
     bundle: RuntimeBundle,
     asker: WebAsker | None = None,
     factory: BundleFactory | None = None,
+    token: str | None = None,
 ) -> Starlette:
     host = WebHost(bundle, factory)
     if asker is not None:
@@ -600,13 +696,31 @@ def create_app(
         body = await _json_object(request)
         if body is None:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-        text = str(body.get("text", "")).strip()
-        if not text:
-            return JSONResponse({"error": "text is required"}, status_code=400)
         if host.busy:
             return JSONResponse({"error": "a turn is already running"}, status_code=409)
+        if bool(body.get("continue", False)):
+            if not host.runtime.messages:
+                return JSONResponse(
+                    {"error": "nothing to continue"}, status_code=400
+                )
+            return StreamingResponse(
+                host.stream_turn(None, request),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        text = str(body.get("text", "")).strip()
+        try:
+            images = _images_from_payload(body.get("images"))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if not text and not images:
+            return JSONResponse({"error": "text or an image is required"}, status_code=400)
         return StreamingResponse(
-            host.stream_turn(text, request),
+            host.stream_turn(text, request, images=images),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
@@ -637,11 +751,13 @@ def create_app(
         return JSONResponse(host.state_payload())
 
     async def sessions(request: Request) -> Response:
+        query = request.query_params.get("q", "").strip()[:200]
         return JSONResponse(
             {
                 "sessions": session_summaries(
                     host.bundle.config.paths,
                     current=host.bundle.session_id,
+                    query=query or None,
                 )
             }
         )
@@ -755,6 +871,26 @@ def create_app(
             return JSONResponse({"error": f"could not delete chat: {exc}"}, status_code=500)
         return JSONResponse({"ok": True})
 
+    async def rewind(request: Request) -> Response:
+        if host.busy:
+            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        try:
+            if bool(body.get("last_user", False)):
+                await host.runtime.rewind_last_user_turn()
+            else:
+                message_id = str(body.get("message_id", "")).strip()
+                if not message_id:
+                    return JSONResponse(
+                        {"error": "message_id is required"}, status_code=400
+                    )
+                await host.runtime.rewind_to(message_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(host.state_payload())
+
     async def model(request: Request) -> Response:
         if host.busy:
             return JSONResponse({"error": "stop the current turn first"}, status_code=409)
@@ -789,6 +925,17 @@ def create_app(
             {"events": events, "state": host.state_payload()}
         )
 
+    async def secured(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        if token and request.url.path.startswith("/api/"):
+            supplied = request.headers.get(
+                "x-cli-agent-token"
+            ) or request.query_params.get("token")
+            if supplied is None or not secrets.compare_digest(supplied, token):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await _security_headers(request, call_next)
+
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         try:
@@ -811,6 +958,7 @@ def create_app(
         Route("/api/sessions/delete", delete_session, methods=["POST"]),
         Route("/api/new", new_session, methods=["POST"]),
         Route("/api/open", open_session, methods=["POST"]),
+        Route("/api/rewind", rewind, methods=["POST"]),
         Route("/api/model", model, methods=["POST"]),
         Route("/api/auto", auto, methods=["POST"]),
         Route("/api/compact", compact, methods=["POST"]),
@@ -819,7 +967,7 @@ def create_app(
     app = Starlette(
         routes=routes,
         lifespan=lifespan,
-        middleware=[Middleware(BaseHTTPMiddleware, dispatch=_security_headers)],
+        middleware=[Middleware(BaseHTTPMiddleware, dispatch=secured)],
     )
     app.state.host = host
     return app
@@ -852,8 +1000,9 @@ def serve(
     port: int = 8765,
     open_browser: bool = True,
     factory: BundleFactory | None = None,
+    token: str | None = None,
 ) -> None:
-    app = create_app(bundle, asker, factory)
+    app = create_app(bundle, asker, factory, token)
     config = uvicorn.Config(
         app,
         host=host,
@@ -863,6 +1012,8 @@ def serve(
     )
     server = uvicorn.Server(config)
     url = f"http://{host}:{port}/"
+    if token:
+        url += f"?token={token}"
     can_open = open_browser and _can_auto_open()
     if open_browser and not can_open:
         print(
