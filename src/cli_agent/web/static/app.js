@@ -1072,11 +1072,9 @@
     };
     if (!session.current) add("Open", () => openSession(session));
     add("Rename", () => openRenameDialog(session));
-    if (!session.current) {
-      add(session.archived ? "Unarchive" : "Archive", () =>
-        setArchived(session, !session.archived)
-      );
-    }
+    add(session.archived ? "Unarchive" : "Archive", () =>
+      setArchived(session, !session.archived)
+    );
     add("Copy session id", async () => {
       try {
         await navigator.clipboard.writeText(session.id);
@@ -1085,10 +1083,8 @@
         toast(session.id);
       }
     });
-    if (!session.current) {
-      menu.appendChild(h("div", "menu-sep"));
-      add("Delete", () => confirmDelete(session), { danger: true });
-    }
+    menu.appendChild(h("div", "menu-sep"));
+    add("Delete", () => confirmDelete(session), { danger: true });
     menu.hidden = false;
     menu.style.left = "0px";
     menu.style.top = "0px";
@@ -1173,12 +1169,22 @@
   }
 
   function confirmDelete(session) {
+    const suffix = session.current
+      ? " A new empty chat will open after it is removed."
+      : "";
     openDialog({
       title: "Delete chat?",
-      body: `“${session.title || "This chat"}” and its files will be removed permanently.`,
+      body: `“${session.title || "This chat"}” and its files will be removed permanently.${suffix}`,
       confirmLabel: "Delete",
       danger: true,
       onConfirm: async () => {
+        if (session.current) {
+          // The server refuses to delete the open session; move to a fresh one
+          // first so any chat, including the current one, can be removed.
+          const data = await api("/api/new", {});
+          applyState(data, { render: true });
+          await refreshSessions();
+        }
         await api("/api/sessions/delete", { id: session.id });
         await refreshSessions();
         toast("Chat deleted.");
@@ -1189,9 +1195,17 @@
 
   async function setArchived(session, archived) {
     try {
+      if (session.current && archived) {
+        const data = await api("/api/new", {});
+        applyState(data, { render: true });
+        await refreshSessions();
+      }
       await api("/api/sessions/archive", { id: session.id, archived });
       await refreshSessions();
-      toast(archived ? "Chat archived." : "Chat restored.");
+      const message = archived
+        ? (session.current ? "Chat archived. Started a new chat." : "Chat archived.")
+        : "Chat restored.";
+      toast(message);
     } catch (error) {
       toast(error.message);
     }

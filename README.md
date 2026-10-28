@@ -88,9 +88,9 @@ same `AgentRuntime`:
 - recent chats read from the project's session directory, newest activity first;
   opening one goes through the normal resume path and creates a fresh runtime;
 - drag the sidebar edge to resize it; right-click (or use the ⋯ button on touch) to
-  rename, archive, or permanently delete a chat. Archived chats stay on disk under
-  "Show archived" and can be restored; rename/archive live in `meta.json`, not in the
-  append-only transcript;
+  rename, archive, or permanently delete a chat (including the open one; a fresh
+  chat opens first). Archived chats stay on disk under "Show archived" and can be
+  restored; rename/archive live in `meta.json`, not in the append-only transcript;
 - "New chat" creates a new session instead of clearing the current one;
 - cancellation stops the running turn through the runtime, not by killing the server.
 
