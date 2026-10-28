@@ -12,6 +12,8 @@ import contextlib
 import json
 import logging
 import os
+import shutil
+import sys
 import threading
 import time
 import uuid
@@ -709,6 +711,25 @@ def create_app(
     return app
 
 
+def _is_wsl() -> bool:
+    try:
+        version = Path("/proc/version").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "microsoft" in version.lower()
+
+
+def _can_auto_open() -> bool:
+    """Whether an auto-open attempt is likely to find a graphical browser."""
+    if os.environ.get("BROWSER"):
+        return True
+    if os.name == "nt" or sys.platform == "darwin":
+        return True
+    if _is_wsl():
+        return shutil.which("wslview") is not None
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def serve(
     bundle: RuntimeBundle,
     asker: WebAsker,
@@ -728,11 +749,19 @@ def serve(
     )
     server = uvicorn.Server(config)
     url = f"http://{host}:{port}/"
-    if open_browser:
+    can_open = open_browser and _can_auto_open()
+    if open_browser and not can_open:
+        print(
+            "This environment has no graphical browser; open the URL manually "
+            "(in WSL, use your Windows browser at the same address).",
+            flush=True,
+        )
+    if can_open:
         def _open_when_ready() -> None:
             for _ in range(100):
                 if server.started:
-                    webbrowser.open(url)
+                    if not webbrowser.open(url):
+                        print(f"Open {url} in your browser.", flush=True)
                     return
                 time.sleep(0.05)
 

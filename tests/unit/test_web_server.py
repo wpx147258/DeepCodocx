@@ -367,3 +367,24 @@ def test_model_choices_hide_providers_without_credentials(
     choices = _model_choices(bundle)
     assert [choice["provider"] for choice in choices] == ["fake"]
     assert choices[0]["model"] == "fake-model"
+
+
+def test_auto_open_skips_headless_and_wsl(monkeypatch) -> None:
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    monkeypatch.setattr(web_server, "_is_wsl", lambda: False)
+    assert web_server._can_auto_open() is False
+
+    monkeypatch.setattr(web_server, "_is_wsl", lambda: True)
+    monkeypatch.setattr(web_server.shutil, "which", lambda name: None)
+    assert web_server._can_auto_open() is False
+    monkeypatch.setattr(
+        web_server.shutil, "which",
+        lambda name: "/usr/bin/wslview" if name == "wslview" else None,
+    )
+    assert web_server._can_auto_open() is True
+
+    monkeypatch.setenv("BROWSER", "custom-browser")
+    assert web_server._can_auto_open() is True
