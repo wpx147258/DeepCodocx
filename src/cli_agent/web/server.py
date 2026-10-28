@@ -35,6 +35,7 @@ from starlette.staticfiles import StaticFiles
 from .. import __version__
 from ..assembly import RuntimeBundle
 from ..config import resolve_api_key
+from ..errors import SessionError
 from ..events import (
     AgentContextEvent,
     AgentError,
@@ -57,6 +58,8 @@ from ..messages import (
     Usage,
 )
 from ..permissions.policy import Answer, PermissionRequest
+from ..session.lock import FileLock
+from ..session.meta import clean_title, read_session_meta, update_session_meta
 from ..session.paths import SessionPaths, list_session_ids
 
 logger = logging.getLogger(__name__)
@@ -180,9 +183,18 @@ class WebHost:
 
     def state_payload(self) -> dict[str, Any]:
         runtime = self.runtime
+        paths = SessionPaths.for_session(
+            self.bundle.config.paths, self.bundle.session_id
+        )
+        meta = read_session_meta(paths)
+        title = clean_title(meta.get("title")) or _title_from_messages(
+            runtime.messages
+        )
         return {
             "version": __version__,
             "session_id": self.bundle.session_id,
+            "title": title,
+            "archived": bool(meta.get("archived")),
             "provider": runtime.provider_name,
             "model": runtime.model,
             "cwd": str(self.bundle.config.paths.cwd),
@@ -444,14 +456,29 @@ def _sse(payload: Mapping[str, Any]) -> str:
     return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
+def _title_from_messages(messages: tuple[Message, ...]) -> str:
+    for message in messages:
+        if message.role != "user":
+            continue
+        text = "".join(
+            block.text for block in message.content if isinstance(block, TextBlock)
+        )
+        text = " ".join(text.split())
+        if text:
+            return text[:120]
+    return "New conversation"
+
+
 def session_summaries(
-    app_paths: Any, *, current: str, limit: int = 20
+    app_paths: Any, *, current: str, limit: int = 50
 ) -> list[dict[str, Any]]:
     """Recent sessions with a title derived from the first user message."""
     entries: list[tuple[float, dict[str, Any]]] = []
     for session_id in list_session_ids(app_paths)[:50]:
         paths = SessionPaths.for_session(app_paths, session_id)
-        title = ""
+        meta = read_session_meta(paths)
+        title = clean_title(meta.get("title")) or ""
+        archived = bool(meta.get("archived"))
         created_at = ""
         provider = ""
         model = ""
@@ -471,7 +498,7 @@ def session_summaries(
                         created_at = str(record.get("created_at", ""))
                         provider = str(record.get("provider", ""))
                         model = str(record.get("model", ""))
-                    elif kind == "clear":
+                    elif kind == "clear" and not clean_title(meta.get("title")):
                         title = ""
                     elif kind == "message" and not title:
                         message = record.get("message")
@@ -486,8 +513,10 @@ def session_summaries(
                             if isinstance(block, dict) and block.get("type") == "text"
                         ).strip()
                         if text:
-                            title = text[:160]
+                            title = " ".join(text.split())[:160]
                             break
+                    if title and created_at:
+                        break
         except OSError:
             continue
         if not title:
@@ -506,6 +535,7 @@ def session_summaries(
                     "provider": provider,
                     "model": model,
                     "current": session_id == current,
+                    "archived": archived,
                 },
             )
         )
@@ -642,7 +672,88 @@ def create_app(
             return JSONResponse(
                 {"error": f"{type(exc).__name__}: {exc}"}, status_code=400
             )
+        paths = SessionPaths.for_session(host.bundle.config.paths, session_id)
+        with contextlib.suppress(OSError, ValueError):
+            # Opening an archived chat makes it active again.
+            update_session_meta(paths, archived=False)
         return JSONResponse(host.state_payload())
+
+    async def rename_session(request: Request) -> Response:
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        session_id = str(body.get("id", "")).strip()
+        if not session_id:
+            return JSONResponse({"error": "id is required"}, status_code=400)
+        try:
+            paths = SessionPaths.for_session(host.bundle.config.paths, session_id)
+        except (SessionError, ValueError):
+            return JSONResponse({"error": "invalid session id"}, status_code=400)
+        if not paths.root.is_dir():
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        try:
+            update_session_meta(paths, title=str(body.get("title", "")))
+        except (ValueError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        if session_id == host.bundle.session_id:
+            return JSONResponse(host.state_payload())
+        return JSONResponse({"ok": True})
+
+    async def archive_session(request: Request) -> Response:
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        session_id = str(body.get("id", "")).strip()
+        archived = bool(body.get("archived", True))
+        if not session_id:
+            return JSONResponse({"error": "id is required"}, status_code=400)
+        if session_id == host.bundle.session_id:
+            return JSONResponse(
+                {"error": "open another chat before archiving this one"},
+                status_code=409,
+            )
+        try:
+            paths = SessionPaths.for_session(host.bundle.config.paths, session_id)
+        except (SessionError, ValueError):
+            return JSONResponse({"error": "invalid session id"}, status_code=400)
+        if not paths.root.is_dir():
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        try:
+            update_session_meta(paths, archived=archived)
+        except OSError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": True, "archived": archived})
+
+    async def delete_session(request: Request) -> Response:
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        session_id = str(body.get("id", "")).strip()
+        if not session_id:
+            return JSONResponse({"error": "id is required"}, status_code=400)
+        if session_id == host.bundle.session_id:
+            return JSONResponse(
+                {"error": "open another chat before deleting this one"},
+                status_code=409,
+            )
+        try:
+            paths = SessionPaths.for_session(host.bundle.config.paths, session_id)
+        except (SessionError, ValueError):
+            return JSONResponse({"error": "invalid session id"}, status_code=400)
+        if not paths.root.is_dir():
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        lock = FileLock(paths.lock)
+        try:
+            lock.acquire()
+        except SessionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        # Release before removal: Windows cannot delete an open lock file.
+        lock.release()
+        try:
+            shutil.rmtree(paths.root)
+        except OSError as exc:
+            return JSONResponse({"error": f"could not delete chat: {exc}"}, status_code=500)
+        return JSONResponse({"ok": True})
 
     async def model(request: Request) -> Response:
         if host.busy:
@@ -695,6 +806,9 @@ def create_app(
         Route("/api/cancel", cancel, methods=["POST"]),
         Route("/api/clear", clear, methods=["POST"]),
         Route("/api/sessions", sessions),
+        Route("/api/sessions/rename", rename_session, methods=["POST"]),
+        Route("/api/sessions/archive", archive_session, methods=["POST"]),
+        Route("/api/sessions/delete", delete_session, methods=["POST"]),
         Route("/api/new", new_session, methods=["POST"]),
         Route("/api/open", open_session, methods=["POST"]),
         Route("/api/model", model, methods=["POST"]),

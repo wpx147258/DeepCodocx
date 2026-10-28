@@ -59,6 +59,10 @@
   the client disappears or times out. Session switching closes the old runtime and
   rebuilds through `assembly.py`; the SSE event names are a public surface like JSONL.
   Serve the page with a strict CSP and keep the default loopback bind.
+- UI-only session state (custom title, archived flag) lives in `meta.json` and is
+  changed atomically; never rewrite `session.jsonl` for display concerns, because that
+  would invalidate the prompt cache. Archive is reversible; delete removes the session
+  directory and must refuse the current session.
 
 - Add a test with every new behavior. Loop tests use `tests/support/fake_provider.py`
   and never hit the network.

@@ -92,9 +92,29 @@ button { cursor: pointer; }
   height: 100dvh;
 }
 
+.resizer {
+  position: absolute;
+  top: 0; right: -3px; bottom: 0;
+  z-index: 6;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer::after {
+  content: "";
+  position: absolute; inset: 0 2px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background .15s ease;
+}
+.resizer:hover::after,
+.resizer:focus-visible::after { background: var(--accent); opacity: .45; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+
 /* ------------------------------------------------------------------ sidebar */
 
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -175,11 +195,13 @@ button { cursor: pointer; }
   overflow-y: auto;
   scrollbar-width: thin;
 }
+.chat-row { position: relative; }
 .chat-item {
   display: flex; flex-direction: column; gap: 1px;
   width: 100%;
   padding: 7px 9px;
   border: 1px solid transparent;
+  padding-right: 30px;
   border-radius: 9px;
   background: transparent;
   text-align: left;
@@ -193,6 +215,37 @@ button { cursor: pointer; }
   font-size: 12.5px; font-weight: 550;
 }
 .chat-item.current .chat-title { color: var(--accent); }
+.chat-item.archived { opacity: .62; }
+.chat-item.archived .chat-title { font-weight: 500; }
+.chat-more {
+  position: absolute;
+  right: 4px; top: 50%;
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  transform: translateY(-50%);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 16px; line-height: 1;
+  opacity: 0;
+  transition: opacity .15s ease, background .15s ease, color .15s ease;
+}
+.chat-row:hover .chat-more,
+.chat-row:focus-within .chat-more { opacity: 1; }
+.chat-more:hover, .chat-more:focus-visible { background: var(--surface-2); color: var(--ink); }
+@media (hover: none) { .chat-more { opacity: 1; } }
+.archived-toggle {
+  margin-top: 5px;
+  padding: 6px 9px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: left;
+}
+.archived-toggle:hover { color: var(--ink); border-color: var(--accent); }
 .chat-meta { color: var(--faint); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-empty { padding: 4px 9px 6px; color: var(--faint); font-size: 11.5px; }
 
@@ -839,6 +892,62 @@ html[data-theme="light"] .icon-moon { display: none; }
 .perm-actions button:disabled { opacity: .45; cursor: default; }
 .perm-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* -------------------------------------------------------------- chat menu */
+
+.chat-menu {
+  position: fixed;
+  z-index: 28;
+  min-width: 178px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  animation: rise .12s ease both;
+}
+.chat-menu button {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  text-align: left;
+}
+.chat-menu button:hover, .chat-menu button:focus-visible { background: var(--surface-2); color: var(--ink); outline: none; }
+.chat-menu button.danger { color: var(--danger); }
+.chat-menu button.danger:hover { background: var(--danger-soft); }
+.chat-menu .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+
+/* ------------------------------------------------------------------ dialog */
+
+.dialog {
+  width: min(100%, 430px);
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise .2s ease both;
+}
+.dialog h2 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -.015em; }
+.dialog-body { margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.dialog-field { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.dialog-field span { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.dialog-field input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--bg);
+  outline: none;
+}
+.dialog-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dialog-error { margin: 9px 0 0; color: var(--danger); font-size: 12px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.dialog-actions .primary.danger { border-color: var(--danger); background: var(--danger); color: #fff; }
+
 /* ------------------------------------------------------------------- toast */
 
 .toast {
@@ -877,6 +986,7 @@ html[data-theme="light"] .icon-moon { display: none; }
     animation: fade .18s ease both;
   }
   .menu { display: grid; }
+  .resizer { display: none; }
   .sidebar .sidebar-close { display: grid; margin-left: 6px; }
   .brand-dot { display: none; }
   .topbar { padding: 10px 13px; }

@@ -12,6 +12,8 @@ from cli_agent.config import AppPaths, load_config
 from cli_agent.messages import user_message
 from cli_agent.permissions.policy import PermissionRequest
 from cli_agent.providers.base import ModelProfile
+from cli_agent.session.meta import read_session_meta, update_session_meta
+from cli_agent.session.paths import SessionPaths
 from cli_agent.session.store import SessionStore
 from cli_agent.web import server as web_server
 from cli_agent.web.server import (
@@ -388,3 +390,89 @@ def test_auto_open_skips_headless_and_wsl(monkeypatch) -> None:
 
     monkeypatch.setenv("BROWSER", "custom-browser")
     assert web_server._can_auto_open() is True
+
+
+def _persisted_session(tmp_path: Path, text: str = "other chat") -> tuple[AppPaths, str]:
+    paths = AppPaths.discover(tmp_path, env=_env(tmp_path))
+    store = SessionStore.new(
+        paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
+    )
+    store.append_message(user_message(text))
+    session_id = store.session_id
+    store.close()
+    return paths, session_id
+
+
+def test_session_meta_title_and_archive(tmp_path: Path) -> None:
+    paths, session_id = _persisted_session(tmp_path)
+    session_paths = SessionPaths.for_session(paths, session_id)
+
+    update_session_meta(session_paths, title="  My   notebook  ")
+    meta = read_session_meta(session_paths)
+    assert meta["title"] == "My notebook"
+
+    update_session_meta(session_paths, archived=True)
+    meta = read_session_meta(session_paths)
+    assert meta["title"] == "My notebook"
+    assert meta["archived"] is True
+
+    summaries = session_summaries(paths, current="another")
+    assert summaries[0]["title"] == "My notebook"
+    assert summaries[0]["archived"] is True
+
+
+async def test_rename_archive_and_delete_session(client_factory, tmp_path: Path) -> None:
+    paths, session_id = _persisted_session(tmp_path, "original title")
+    client, _, _ = await client_factory([])
+
+    async with client:
+        renamed = await client.post(
+            "/api/sessions/rename",
+            json={"id": session_id, "title": "  Renamed   notebook "},
+        )
+        assert renamed.status_code == 200
+        listed = (await client.get("/api/sessions")).json()["sessions"]
+        assert listed[0]["title"] == "Renamed notebook"
+
+        empty = await client.post(
+            "/api/sessions/rename", json={"id": session_id, "title": "   "}
+        )
+        assert empty.status_code == 400
+
+        archived = await client.post(
+            "/api/sessions/archive", json={"id": session_id, "archived": True}
+        )
+        assert archived.status_code == 200
+        listed = (await client.get("/api/sessions")).json()["sessions"]
+        assert listed[0]["archived"] is True
+
+        restored = await client.post(
+            "/api/sessions/archive", json={"id": session_id, "archived": False}
+        )
+        assert restored.status_code == 200
+        listed = (await client.get("/api/sessions")).json()["sessions"]
+        assert listed[0]["archived"] is False
+
+        deleted = await client.post("/api/sessions/delete", json={"id": session_id})
+        assert deleted.status_code == 200
+        assert not SessionPaths.for_session(paths, session_id).root.exists()
+        again = await client.post("/api/sessions/delete", json={"id": session_id})
+        assert again.status_code == 404
+
+
+async def test_session_actions_protect_current_and_validate(client_factory) -> None:
+    client, _, _ = await client_factory([])
+    async with client:
+        for action in ("archive", "delete"):
+            response = await client.post(
+                f"/api/sessions/{action}", json={"id": "test-session"}
+            )
+            assert response.status_code == 409
+        bad = await client.post(
+            "/api/sessions/rename", json={"id": "../escape", "title": "x"}
+        )
+        assert bad.status_code == 400
+        empty = await client.post(
+            "/api/sessions/rename", json={"id": "missing", "title": "   "}
+        )
+        assert empty.status_code == 404

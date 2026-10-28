@@ -13,6 +13,8 @@
     draftKey: "cli-agent-draft",
     toastTimer: null,
     sessions: [],
+    sidebarWidth: 268,
+    archivedOpen: false,
   };
 
   // ------------------------------------------------------------------ utils
@@ -81,6 +83,64 @@
     const node = h("div", kind === "error" ? "error-note" : "system-note", text);
     $("messages").appendChild(node);
     scrollIfSticky();
+  }
+
+  const SIDEBAR_DEFAULT = 268;
+  const SIDEBAR_MIN = 220;
+  const SIDEBAR_MAX = 460;
+  let sidebarDrag = null;
+
+  function applySidebarWidth(width, { persist = false } = {}) {
+    const clamped = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(width)));
+    document.documentElement.style.setProperty("--sidebar-w", `${clamped}px`);
+    state.sidebarWidth = clamped;
+    if (persist) {
+      try { localStorage.setItem("cli-agent-sidebar-width", String(clamped)); } catch (_) { /* ignore */ }
+    }
+  }
+
+  function loadSidebarWidth() {
+    try {
+      const saved = Number(localStorage.getItem("cli-agent-sidebar-width"));
+      if (Number.isFinite(saved) && saved > 0) applySidebarWidth(saved);
+    } catch (_) { /* ignore */ }
+  }
+
+  function bindSidebarResizer() {
+    const resizer = $("sidebar-resizer");
+    resizer.addEventListener("pointerdown", (event) => {
+      if (window.matchMedia("(max-width: 900px)").matches) return;
+      sidebarDrag = {
+        startX: event.clientX,
+        startWidth: state.sidebarWidth || SIDEBAR_DEFAULT,
+      };
+      resizer.setPointerCapture(event.pointerId);
+      document.body.classList.add("resizing");
+      event.preventDefault();
+    });
+    resizer.addEventListener("pointermove", (event) => {
+      if (!sidebarDrag) return;
+      applySidebarWidth(sidebarDrag.startWidth + event.clientX - sidebarDrag.startX);
+    });
+    const finish = () => {
+      if (!sidebarDrag) return;
+      sidebarDrag = null;
+      document.body.classList.remove("resizing");
+      applySidebarWidth(state.sidebarWidth, { persist: true });
+    };
+    resizer.addEventListener("pointerup", finish);
+    resizer.addEventListener("pointercancel", finish);
+    resizer.addEventListener("dblclick", () => {
+      applySidebarWidth(SIDEBAR_DEFAULT, { persist: true });
+    });
+    resizer.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const delta = event.key === "ArrowRight" ? 16 : -16;
+      applySidebarWidth((state.sidebarWidth || SIDEBAR_DEFAULT) + delta, {
+        persist: true,
+      });
+    });
   }
 
   function setSidebar(open) {
@@ -474,6 +534,9 @@
   }
 
   function createTurn(userText) {
+    if ($("chat-title").textContent === "New conversation") {
+      $("chat-title").textContent = truncate(userText, 48);
+    }
     addUserMessage([{ type: "text", text: userText }]);
     const shell = assistantShell();
     shell.row.classList.add("streaming");
@@ -832,6 +895,7 @@
       updateEmptyState();
       updateTitle(data.messages || []);
     }
+    if (data.title) $("chat-title").textContent = data.title;
   }
 
   function populateModels(models, data) {
@@ -926,24 +990,210 @@
       : date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
 
+  function chatRow(session) {
+    const row = h("div", "chat-row");
+    const item = h("button", "chat-item");
+    item.type = "button";
+    item.classList.toggle("current", Boolean(session.current));
+    item.classList.toggle("archived", Boolean(session.archived));
+    item.title = session.title || "Untitled chat";
+    if (session.current) item.setAttribute("aria-current", "true");
+    item.appendChild(h("span", "chat-title", session.title || "Untitled chat"));
+    const meta = [session.model, formatWhen(session.created_at)].filter(Boolean).join(" · ");
+    if (meta) item.appendChild(h("span", "chat-meta", meta));
+    item.addEventListener("click", () => openSession(session));
+    item.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openChatMenu(event.clientX, event.clientY, session);
+    });
+
+    const more = h("button", "chat-more", "⋯");
+    more.type = "button";
+    more.title = "Chat actions";
+    more.setAttribute("aria-label", `Actions for ${session.title || "chat"}`);
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const rect = more.getBoundingClientRect();
+      openChatMenu(rect.right - 2, rect.bottom + 4, session);
+    });
+    row.append(item, more);
+    return row;
+  }
+
   function renderSessions(sessions) {
     state.sessions = sessions || [];
     const list = $("chat-list");
     list.textContent = "";
-    if (!state.sessions.length) {
+    const active = state.sessions.filter((session) => !session.archived);
+    const archived = state.sessions.filter((session) => session.archived);
+    if (!active.length && !archived.length) {
       list.appendChild(h("div", "chat-empty", "No saved chats yet."));
       return;
     }
-    for (const session of state.sessions) {
-      const button = h("button", `chat-item${session.current ? " current" : ""}`);
+    if (!active.length) {
+      list.appendChild(h("div", "chat-empty", "No active chats."));
+    }
+    for (const session of active) list.appendChild(chatRow(session));
+    if (archived.length) {
+      const toggle = h(
+        "button",
+        "archived-toggle",
+        `${state.archivedOpen ? "Hide" : "Show"} archived (${archived.length})`
+      );
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        state.archivedOpen = !state.archivedOpen;
+        renderSessions(state.sessions);
+      });
+      list.appendChild(toggle);
+      if (state.archivedOpen) {
+        for (const session of archived) list.appendChild(chatRow(session));
+      }
+    }
+  }
+
+  function closeChatMenu() {
+    $("chat-menu").hidden = true;
+    $("chat-menu").textContent = "";
+  }
+
+  function openChatMenu(x, y, session) {
+    const menu = $("chat-menu");
+    menu.textContent = "";
+    const add = (label, handler, { danger = false } = {}) => {
+      const button = h("button", danger ? "danger" : "", label);
       button.type = "button";
-      button.title = session.title || "Untitled chat";
-      if (session.current) button.setAttribute("aria-current", "true");
-      button.appendChild(h("span", "chat-title", session.title || "Untitled chat"));
-      const meta = [session.model, formatWhen(session.created_at)].filter(Boolean).join(" · ");
-      if (meta) button.appendChild(h("span", "chat-meta", meta));
-      button.addEventListener("click", () => openSession(session));
-      list.appendChild(button);
+      button.setAttribute("role", "menuitem");
+      button.addEventListener("click", () => {
+        closeChatMenu();
+        handler();
+      });
+      menu.appendChild(button);
+    };
+    if (!session.current) add("Open", () => openSession(session));
+    add("Rename", () => openRenameDialog(session));
+    if (!session.current) {
+      add(session.archived ? "Unarchive" : "Archive", () =>
+        setArchived(session, !session.archived)
+      );
+    }
+    add("Copy session id", async () => {
+      try {
+        await navigator.clipboard.writeText(session.id);
+        toast("Session id copied.");
+      } catch (_) {
+        toast(session.id);
+      }
+    });
+    if (!session.current) {
+      menu.appendChild(h("div", "menu-sep"));
+      add("Delete", () => confirmDelete(session), { danger: true });
+    }
+    menu.hidden = false;
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  }
+
+  let dialogSubmit = null;
+
+  function openDialog(opts) {
+    if (!$("permission").hidden) return;
+    $("dialog-title").textContent = opts.title;
+    $("dialog-body").textContent = opts.body || "";
+    $("dialog-body").hidden = !opts.body;
+    $("dialog-field").hidden = !opts.field;
+    $("dialog-input").value = opts.value || "";
+    $("dialog-error").hidden = true;
+    const confirm = $("dialog-confirm");
+    confirm.textContent = opts.confirmLabel || "Save";
+    confirm.classList.toggle("danger", Boolean(opts.danger));
+    confirm.disabled = false;
+    dialogSubmit = opts.onConfirm;
+    $("dialog").hidden = false;
+    document.querySelector(".app").inert = true;
+    setTimeout(() => {
+      if (opts.field) {
+        $("dialog-input").focus();
+        $("dialog-input").select();
+      } else {
+        confirm.focus();
+      }
+    }, 30);
+  }
+
+  function closeDialog() {
+    $("dialog").hidden = true;
+    $("dialog-error").hidden = true;
+    dialogSubmit = null;
+    document.querySelector(".app").inert = false;
+  }
+
+  async function submitDialog() {
+    if (!dialogSubmit) return;
+    const confirm = $("dialog-confirm");
+    const error = $("dialog-error");
+    confirm.disabled = true;
+    try {
+      const message = await dialogSubmit();
+      if (message) {
+        error.textContent = message;
+        error.hidden = false;
+        confirm.disabled = false;
+        return;
+      }
+      closeDialog();
+    } catch (exc) {
+      error.textContent = exc.message || String(exc);
+      error.hidden = false;
+      confirm.disabled = false;
+    }
+  }
+
+  function openRenameDialog(session) {
+    openDialog({
+      title: "Rename chat",
+      field: true,
+      value: session.title || "",
+      confirmLabel: "Save",
+      onConfirm: async () => {
+        const title = $("dialog-input").value.trim();
+        if (!title) return "Enter a name.";
+        await api("/api/sessions/rename", { id: session.id, title });
+        await refreshSessions();
+        if (state.data && state.data.session_id === session.id) {
+          await refreshState();
+        }
+        toast("Chat renamed.");
+        return "";
+      },
+    });
+  }
+
+  function confirmDelete(session) {
+    openDialog({
+      title: "Delete chat?",
+      body: `“${session.title || "This chat"}” and its files will be removed permanently.`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        await api("/api/sessions/delete", { id: session.id });
+        await refreshSessions();
+        toast("Chat deleted.");
+        return "";
+      },
+    });
+  }
+
+  async function setArchived(session, archived) {
+    try {
+      await api("/api/sessions/archive", { id: session.id, archived });
+      await refreshSessions();
+      toast(archived ? "Chat archived." : "Chat restored.");
+    } catch (error) {
+      toast(error.message);
     }
   }
 
@@ -1159,6 +1409,24 @@
 
     $("notice-close").addEventListener("click", () => { $("notice-bar").hidden = true; });
 
+    $("dialog-cancel").addEventListener("click", closeDialog);
+    $("dialog-confirm").addEventListener("click", submitDialog);
+    $("dialog-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitDialog();
+      }
+    });
+    bindSidebarResizer();
+
+    document.addEventListener("pointerdown", (event) => {
+      if ($("chat-menu").hidden) return;
+      if (!event.target.closest("#chat-menu")) closeChatMenu();
+    });
+    window.addEventListener("resize", closeChatMenu);
+    window.addEventListener("wheel", closeChatMenu, { passive: true });
+    window.addEventListener("touchmove", closeChatMenu, { passive: true });
+
     $("perm-allow").addEventListener("click", () => decidePermission("yes"));
     $("perm-always").addEventListener("click", () => decidePermission("always"));
     $("perm-deny").addEventListener("click", () => decidePermission("no"));
@@ -1172,6 +1440,14 @@
         }
         return;
       }
+      if (!$("dialog").hidden) {
+        if (event.key === "Escape") { event.preventDefault(); closeDialog(); }
+        return;
+      }
+      if (!$("chat-menu").hidden) {
+        if (event.key === "Escape") { event.preventDefault(); closeChatMenu(); }
+        return;
+      }
       if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
         event.preventDefault();
         setSidebar(false);
@@ -1183,6 +1459,7 @@
 
   async function init() {
     applyTheme(initialTheme());
+    loadSidebarWidth();
     bindEvents();
     loadDraft();
     updateComposer();
