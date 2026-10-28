@@ -364,7 +364,7 @@ def test_store_close_is_idempotent(tmp_path: Path) -> None:
         resumed.close()
 
 
-def test_clear_resets_messages_usage_and_checkpoint(tmp_path: Path) -> None:
+def test_clear_resets_messages_and_checkpoint_but_keeps_usage(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     store = SessionStore.new(
         paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
@@ -380,14 +380,14 @@ def test_clear_resets_messages_usage_and_checkpoint(tmp_path: Path) -> None:
 
     resumed, loaded = SessionStore.resume(paths, session_id)
     try:
-        assert loaded.usage == Usage(3, 4)
+        assert loaded.usage == Usage(4, 6)
         assert loaded.messages == ()
         assert loaded.checkpoint is None
     finally:
         resumed.close()
 
 
-def test_clear_as_last_record_resets_usage(tmp_path: Path) -> None:
+def test_clear_as_last_record_keeps_usage(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     store = SessionStore.new(
         paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
@@ -400,13 +400,13 @@ def test_clear_as_last_record_resets_usage(tmp_path: Path) -> None:
 
     resumed, loaded = SessionStore.resume(paths, session_id)
     try:
-        assert loaded.usage == Usage()
+        assert loaded.usage == Usage(9, 9)
         assert loaded.messages == ()
     finally:
         resumed.close()
 
 
-def test_legacy_clear_without_usage_reset_field_resets_usage(tmp_path: Path) -> None:
+def test_legacy_clear_record_keeps_usage(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     store = SessionStore.new(
         paths, provider="mock", model="mock-1", cwd=tmp_path, persist=True
@@ -419,7 +419,7 @@ def test_legacy_clear_without_usage_reset_field_resets_usage(tmp_path: Path) -> 
 
     resumed, loaded = SessionStore.resume(paths, session_id)
     try:
-        assert loaded.usage == Usage()
+        assert loaded.usage == Usage(5, 6)
     finally:
         resumed.close()
 

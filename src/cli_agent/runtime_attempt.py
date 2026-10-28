@@ -32,7 +32,6 @@ class Attempt:
     stop_reason: StopReason = "end_turn"
     parse_errors: dict[str, str] = field(default_factory=dict)
     emitted_text: bool = False
-    emitted_partial: bool = False
     usage: Usage = field(default_factory=Usage)
 
 
@@ -49,15 +48,12 @@ async def stream_attempt(
             if not event.text:
                 continue
             attempt.emitted_text = True
-            attempt.emitted_partial = True
             yield AgentTextDelta(event.text)
         elif isinstance(event, ReasoningDelta):
             if not event.text:
                 continue
-            attempt.emitted_partial = True
             yield AgentTextDelta(event.text, reasoning=True)
         elif isinstance(event, ToolCall):
-            attempt.emitted_partial = True
             if event.parse_error:
                 attempt.parse_errors[event.tool_use_id] = event.parse_error
             yield AgentToolStarted(event.tool_use_id, event.name, event.input)
@@ -69,7 +65,6 @@ async def stream_attempt(
             attempt.usage = event.usage
             if not attempt.emitted_text and event.message.text():
                 # Providers that do not stream deltas still get live output.
-                attempt.emitted_partial = True
                 yield AgentTextDelta(event.message.text())
             # The completed message is terminal; trailing provider events are
             # noise and must not turn a finished response into an error.

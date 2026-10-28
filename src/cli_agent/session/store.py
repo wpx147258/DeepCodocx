@@ -196,17 +196,9 @@ class SessionStore:
         )
 
     def append_clear(self) -> None:
-        """Start a new conversation: messages and usage reset from this point."""
         if not self.persist:
             return
-        self._append(
-            {
-                "v": SCHEMA_VERSION,
-                "type": "clear",
-                "usage_reset": True,
-                "at": now_iso(),
-            }
-        )
+        self._append({"v": SCHEMA_VERSION, "type": "clear", "at": now_iso()})
 
     def append_permission_mode(self, mode: str, auto_previous: str | None) -> None:
         if not self.persist:
@@ -354,9 +346,6 @@ class SessionStore:
                     degraded = True
             elif record_type == "clear":
                 messages.clear()
-                # Older clear records lack the field; they reset usage too.
-                if record.get("usage_reset", True) is not False:
-                    usage = Usage()
             elif record_type == "permission":
                 mode = record.get("mode")
                 if isinstance(mode, str) and mode:

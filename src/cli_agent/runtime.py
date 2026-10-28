@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from .context.memory import MemoryRecord, MemoryStore, inject_memory, memory_note
 from .context.pipeline import ContextPipeline
@@ -246,19 +246,6 @@ class AgentRuntime:
                 ):
                     yield agent_event
             except ProviderFailure as failure:
-                if attempt.emitted_partial and failure.kind in (
-                    "retryable",
-                    "context_length",
-                ):
-                    # Retrying would stream the same opening again. Stop and
-                    # let the user decide whether to resend.
-                    yield AgentError(
-                        f"{failure.message} (after partial output; not retrying)",
-                        failure.kind,
-                        failure.status_code,
-                    )
-                    yield AgentTurnFinished("error", self._usage)
-                    return
                 action, delay = await self._recover(failure, recovery)
                 if action == "retry":
                     yield AgentRetry(
@@ -326,18 +313,14 @@ class AgentRuntime:
             self._deps.session.save_context(prepared.checkpoint.to_dict())
         for event in prepared.events:
             yield AgentContextEvent(event.kind, event.detail)
-        if prepared.checkpoint is None and not any(
-            event.kind == "compact_skipped" for event in prepared.events
-        ):
+        if prepared.checkpoint is None:
             yield AgentNotice("Nothing to compact.")
 
     async def clear(self) -> None:
-        # Persist first: a failed write must not leave memory ahead of disk.
-        self._deps.session.append_clear()
-        self._deps.session.save_context(None)
         self._deps.transcript.clear()
         self._deps.context.set_checkpoint(None)
-        self._usage = Usage()
+        self._deps.session.append_clear()
+        self._deps.session.save_context(None)
         self._active_request = ""
         self._last_request_tokens = 0
         self._last_usage = Usage()
@@ -443,12 +426,6 @@ class AgentRuntime:
         """Authorize every call in order, then execute in concurrency-safe batches."""
         results: list[ToolResultBlock] = []
         completed: set[str] = set()
-        # The profile can change between calls (for example via /model), so
-        # derive capability from the profile serving this request.
-        tool_context = replace(
-            self._deps.tool_context,
-            supports_images=self._deps.profile.supports_images,
-        )
         try:
             # Authorization can wait on a user prompt; cancellation must close
             # the tool_use/tool_result pair even before any tool starts.
@@ -462,7 +439,7 @@ class AgentRuntime:
                 for call in calls
             ]
             async for item, result in self._deps.executor.run_all(
-                prepared, ctx=tool_context
+                prepared, ctx=self._deps.tool_context
             ):
                 completed.add(item.call.id)
                 results.append(_to_result_block(item.call.id, result))

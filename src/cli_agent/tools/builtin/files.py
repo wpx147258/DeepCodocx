@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ...messages import IMAGE_UNSUPPORTED_NOTE, ImageBlock
+from ...messages import ImageBlock
 from ..base import ToolContext, ToolResult, ToolSpec
 
 MAX_READ_BYTES = 10 * 1024 * 1024
@@ -64,8 +64,7 @@ class ReadTool:
         name="Read",
         description=(
             "Read a text file. Returns numbered lines. Use offset and limit for large files. "
-            "Image files return an image block when the active model supports image input; "
-            "otherwise they return a short note."
+            "Image files return an image block when supported."
         ),
         input_schema={
             "type": "object",
@@ -110,8 +109,6 @@ class ReadTool:
         if suffix in _IMAGE_TYPES:
             if size > MAX_IMAGE_BYTES:
                 return ToolResult.error(f"Error: image is too large ({size} bytes)")
-            if not ctx.supports_images:
-                return ToolResult.text(IMAGE_UNSUPPORTED_NOTE)
             data = base64.b64encode(path.read_bytes()).decode("ascii")
             return ToolResult((ImageBlock(_IMAGE_TYPES[suffix], data),))
 

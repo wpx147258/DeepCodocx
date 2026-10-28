@@ -143,7 +143,6 @@ class WebHost:
                 "tool": request.tool_name,
                 "reason": request.reason,
                 "input": dict(request.tool_input),
-                "scope": request.scope,
             }
         )
         try:

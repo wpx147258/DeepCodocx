@@ -208,13 +208,11 @@ async def test_permission_bridge_round_trip(tmp_path: Path) -> None:
         tool_name="Bash",
         tool_input={"command": "rm -rf x"},
         reason="shell tool in default mode",
-        scope="command: rm -rf x",
     )
     task = asyncio.create_task(host.request_permission(request))
     event = await asyncio.wait_for(host._queue.get(), timeout=1)
     assert event["type"] == "permission_request"
     assert event["tool"] == "Bash"
-    assert event["scope"] == "command: rm -rf x"
     assert host.resolve_permission(event["id"], "always")
     assert await task == "always"
     assert not host.resolve_permission("missing", "yes")

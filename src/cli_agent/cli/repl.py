@@ -33,8 +33,6 @@ class RichAsker:
         )
         self.console.print(f"[dim]{escape(request.reason)}[/dim]")
         self.console.print(f"[dim]{escape(preview)}[/dim]")
-        if request.scope:
-            self.console.print(f"[dim]always scope: {escape(request.scope)}[/dim]")
         try:
             answer = input("Allow? (y/n/a=always): ").strip().lower()
         except (EOFError, KeyboardInterrupt):

@@ -20,13 +20,13 @@ class CommandResult:
 
 _HELP = """Commands:
   /help              show this help
-  /clear             clear the conversation and reset usage
+  /clear             clear the conversation
   /compact           compact the context now
   /model [NAME]      show or switch model; use provider:model to switch provider
   /auto [on|off]     toggle full-permission mode (no approval prompts)
   /memory [list]     list saved memories
   /memory forget X   delete the memory named X
-  /cost              show usage since the last /clear
+  /cost              show cumulative token usage
   /exit              leave the REPL
 
 Key flags: cli-agent run for one-shot, -c/--resume, --provider, --model, --permission-mode."""
@@ -52,7 +52,7 @@ class CommandDispatcher:
             return CommandResult(True)
         if name == "clear":
             await runtime.clear()
-            renderer.notice("Conversation cleared; usage reset.")
+            renderer.notice("Conversation cleared.")
             return CommandResult(True)
         if name == "compact":
             renderer.notice(

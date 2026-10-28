@@ -36,11 +36,6 @@ class ReasoningBlock:
     opaque: Mapping[str, Any] = field(default_factory=dict)
 
 
-IMAGE_UNSUPPORTED_NOTE = (
-    "Image not shown: the active model does not support image input."
-)
-
-
 @dataclass(frozen=True, slots=True)
 class ImageBlock:
     media_type: str

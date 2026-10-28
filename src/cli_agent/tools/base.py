@@ -19,7 +19,6 @@ class ToolSpec:
     input_schema: Mapping[str, Any]
     category: ToolCategory = "meta"
     path_arg: str | None = None
-    scope_arg: str | None = None
     concurrency_safe: bool = False
 
 
@@ -42,16 +41,9 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Per-call execution context.
-
-    ``supports_images`` mirrors the active model profile. Callers must derive it
-    from the profile that will receive the result, not from startup defaults.
-    """
-
     cwd: Path
     session_id: str
     data_dir: Path
-    supports_images: bool = False
 
 
 class Tool(Protocol):

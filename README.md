@@ -185,8 +185,8 @@ the model think. Use a reasoning-capable model; for DeepSeek, `deepseek-flash`
 `run` exits `0` only when the turn ends normally. A refusal, provider error, or
 `--max-turns` cutoff exits `2`, and the stop reason is written to stderr. Retries are
 announced too (inline in the REPL, on stderr in one-shot mode); if an attempt had already
-streamed text, the notice says that the earlier text is stale rather than silently
-splicing two partial answers together.
+streamed text, the retry notice marks the earlier output as partial so hosts can avoid
+presenting it as a complete answer.
 
 `/cost` reports billed usage (uncached input, output, cache reads and writes), the
 estimated size of the last request against the context window, and the prefix cache
@@ -246,9 +246,9 @@ Implemented today:
 - explicit provider abstraction plus the Anthropic-compatible adapter
   (Anthropic, DeepSeek, Kimi, MiniMax, GLM presets);
 - `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `load_skill`;
-- image input: `Read` returns image blocks for png/jpeg/gif/webp, and presets
-  declaring `supports_images` (`anthropic`, `deepseek`) forward them; other profiles
-  receive a text placeholder instead;
+- image input: `Read` returns image blocks for png/jpeg/gif/webp; presets declaring
+  `supports_images` (`anthropic`, `deepseek`) forward them, and the adapter replaces
+  them with a text placeholder for profiles that do not support images;
 - ordered tool execution inside the one loop: permission checks stay serialized, and
   consecutive `concurrency_safe` reads run in parallel while writes and shells act as
   barriers;
@@ -278,7 +278,7 @@ Implemented today:
   `--thinking/--no-thinking` overrides it (one-shot mode writes reasoning to stderr);
 - REPL (`cli-agent`), one-shot (`cli-agent run`), and
   `/help /clear /compact /model /auto /memory /cost /exit`;
-  `/clear` starts a new conversation and resets usage, so `/cost` counts from that point;
+  `/clear` clears messages and the compaction checkpoint; usage stays cumulative;
 - local web client (`cli-agent web`) with streaming chat, browser approval prompts,
   recent-chat switching, Ask/Auto mode, and cancellation over SSE;
 - headless `--output-format text|json|jsonl` with a stable result schema, clean
@@ -290,11 +290,10 @@ cron/background tasks, workflow runtime, goal loop, web tools, LSP, notebook, pl
 mode, tool search, OpenAI-compatible adapter, and a public plugin SDK.
 
 Notes: compaction is best-effort. Permission rules are approval UX,
-not a sandbox — shell allow rules are skipped for commands containing common
-composition operators or launchers, quoted operators are treated conservatively,
-and `always` is scoped to the exact command/path/tool. Use an external sandbox for
-untrusted work. DeepSeek-compatible endpoints may emit reasoning even without
-`--extended-thinking`; the display flag still controls whether it is shown.
+not a sandbox — an explicit `permissions.allow` rule still wins, and `always`
+remembers the tool for the session. Use an external sandbox for untrusted work.
+DeepSeek-compatible endpoints may emit reasoning even without `--extended-thinking`;
+the display flag still controls whether it is shown.
 
 ## Development
 

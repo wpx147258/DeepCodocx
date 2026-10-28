@@ -626,10 +626,28 @@
         systemNote(event.text);
         break;
       case "retry":
-        systemNote(
-          `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}` +
-          (event.partial ? " · output may repeat" : "")
-        );
+        if (event.partial) {
+          // The host already displayed an abandoned opening. Clear it so the
+          // retried attempt is not spliced onto a stale partial answer.
+          for (const node of turn.textSegments) {
+            node._raw = "";
+            node.innerHTML = "";
+          }
+          turn.textSegments = [];
+          turn.currentText = null;
+          turn.dirtyText = null;
+          if (turn.currentReasoning) turn.currentReasoning.remove();
+          turn.currentReasoning = null;
+          turn.currentReasoningText = null;
+          systemNote(
+            `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}; ` +
+            "the partial response was discarded."
+          );
+        } else {
+          systemNote(
+            `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}`
+          );
+        }
         break;
       case "permission_request":
         showPermission(event);
@@ -754,8 +772,10 @@
     $("perm-title").textContent = `Allow ${event.tool}?`;
     $("perm-reason").textContent = event.reason || "This tool needs your approval.";
     $("perm-input").textContent = JSON.stringify(event.input || {}, null, 2);
-    $("perm-scope").textContent = event.scope ? `Always scope: ${event.scope}` : "";
     const highRisk = /high-risk/i.test(event.reason || "");
+    $("perm-scope").textContent = highRisk
+      ? "This command always needs a fresh approval."
+      : `“Always allow” remembers ${event.tool} for this session.`;
     $("perm-always").hidden = highRisk;
     for (const button of [$("perm-deny"), $("perm-always"), $("perm-allow")]) {
       button.disabled = false;

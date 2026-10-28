@@ -139,12 +139,7 @@ def make_runtime(
         context=pipeline,
         prompt_builder=PromptBuilder(),
         session=session,
-        tool_context=ToolContext(
-            cwd=tmp_path,
-            session_id="test",
-            data_dir=tmp_path,
-            supports_images=profile.supports_images,
-        ),
+        tool_context=ToolContext(cwd=tmp_path, session_id="test", data_dir=tmp_path),
         skills=SkillLoader([]),
         project_instructions="",
         estimator=estimator,
