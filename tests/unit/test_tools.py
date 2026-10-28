@@ -7,7 +7,7 @@ from cli_agent.messages import ImageBlock
 from cli_agent.tools.base import ToolContext
 from cli_agent.tools.builtin.bash import BashTool
 from cli_agent.tools.builtin.files import EditTool, ReadTool, WriteTool
-from cli_agent.tools.builtin.search import GlobTool, GrepTool
+from cli_agent.tools.builtin.search import GlobTool, GrepTool, _rebase_line
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -195,3 +195,11 @@ async def test_large_tool_output_is_spilled_at_creation(tmp_path: Path) -> None:
     small = await _run(SizedTool(200), tmp_path / "small")
     assert small.text_content() == "x" * 200
     assert not list((tmp_path / "small" / "spills").glob("*.txt"))
+
+
+def test_grep_rebase_line_handles_windows_drive_paths(tmp_path: Path) -> None:
+    ctx = ToolContext(cwd=tmp_path, session_id="test", data_dir=tmp_path)
+    line = r"C:\repo\a.py:12:print('a:b')"
+    rebased = _rebase_line(line, tmp_path, ctx)
+    assert rebased.endswith(":12:print('a:b')")
+    assert "a.py" in rebased

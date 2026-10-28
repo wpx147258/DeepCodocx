@@ -224,8 +224,9 @@ def _rebase_path(line: str, root: Path, ctx: ToolContext) -> str:
 
 
 def _rebase_line(line: str, root: Path, ctx: ToolContext) -> str:
-    parts = line.split(":", 2)
-    if len(parts) != 3:
+    # Split from the right: on Windows the path itself starts with "C:\".
+    parts = line.rsplit(":", 2)
+    if len(parts) != 3 or not parts[1].isdigit():
         return line
     path_text, number, rest = parts
     path = Path(path_text)

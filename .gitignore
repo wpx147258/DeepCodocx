@@ -10,3 +10,5 @@ build/
 .env
 .env.*
 config.toml
+.coverage
+htmlcov/

@@ -43,12 +43,14 @@ def _profile(context_window: int, max_output: int = 1_000) -> ModelProfile:
     )
 
 
-def _pipeline(root: Path, *, checkpoint=None) -> ContextPipeline:
+def _pipeline(
+    root: Path, *, checkpoint=None, summarize=_summarize
+) -> ContextPipeline:
     paths = _paths(root)
     return ContextPipeline(
         estimator=TokenEstimator(),
         session_paths=paths,
-        summarize=_summarize,
+        summarize=summarize,
         checkpoint=checkpoint,
     )
 
@@ -136,3 +138,53 @@ async def test_history_is_never_rewritten(tmp_path: Path) -> None:
     assert not list((tmp_path / "session" / "spills").glob("*.txt"))
     assert not list((tmp_path / "session" / "archive").glob("*.jsonl"))
     assert not prepared.events
+
+
+async def test_summary_skips_when_the_input_budget_is_too_small(
+    tmp_path: Path,
+) -> None:
+    calls: list[int] = []
+
+    async def summarize(text: str, max_tokens: int) -> str:
+        calls.append(max_tokens)
+        return "SUMMARY"
+
+    pipeline = _pipeline(tmp_path / "session", summarize=summarize)
+    messages = [user_message("start")]
+    for index in range(6):
+        messages.append(assistant_message([TextBlock(f"step {index} " + "z" * 6_000)]))
+    prepared = await pipeline.prepare(
+        Transcript(messages),
+        "start",
+        _profile(8_000, max_output=2_000),
+        force_compact=True,
+    )
+    assert any(
+        event.kind == "compact_skipped" and "summary input" in event.detail
+        for event in prepared.events
+    )
+    assert calls == []
+
+
+async def test_summary_input_is_bounded_by_the_profile(tmp_path: Path) -> None:
+    texts: list[str] = []
+
+    async def summarize(text: str, max_tokens: int) -> str:
+        texts.append(text)
+        return "SUMMARY"
+
+    pipeline = _pipeline(tmp_path / "session", summarize=summarize)
+    messages = [user_message("start")]
+    for index in range(6):
+        messages.append(assistant_message([TextBlock(f"step {index} " + "z" * 20_000)]))
+    prepared = await pipeline.prepare(
+        Transcript(messages),
+        "start",
+        _profile(20_000, max_output=2_000),
+        force_compact=True,
+    )
+    assert texts, "summary should still run"
+    assert "summary input truncated" in texts[0]
+    input_budget = 20_000 - 2_000 - 4_096 - 2_000 - 1_024
+    assert TokenEstimator().estimate_text(texts[0]) <= input_budget
+    assert any(event.kind == "compact" for event in prepared.events)

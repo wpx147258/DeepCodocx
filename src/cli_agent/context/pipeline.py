@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 SUMMARY_TRIGGER = 0.85
 SUMMARY_TARGET = 0.30
 SUMMARY_MAX_TOKENS = 2_000
+SUMMARY_INPUT_RESERVE = 1_024
+MIN_SUMMARY_INPUT_TOKENS = 256
 REACTIVE_KEEP_MESSAGES = 5
 MIN_TAIL_MESSAGES = 4
 
@@ -221,7 +223,18 @@ class ContextPipeline:
             return None
         head = view[:start]
         tail = view[start:]
-        text = _messages_to_text(head)
+        input_budget = budget - SUMMARY_MAX_TOKENS - SUMMARY_INPUT_RESERVE
+        if input_budget < MIN_SUMMARY_INPUT_TOKENS:
+            events.append(
+                ContextEvent(
+                    "compact_skipped",
+                    "not enough context room for the summary input",
+                )
+            )
+            return None
+        text = _trim_to_tokens(
+            _messages_to_text(head), input_budget, self.estimator
+        )
         if len(text) < 80:
             events.append(ContextEvent("compact_skipped", "history too short"))
             return None
@@ -286,6 +299,28 @@ def _result_text(block: ToolResultBlock) -> str:
     return "\n".join(
         item.text for item in block.content if isinstance(item, TextBlock)
     )
+
+
+def _trim_to_tokens(text: str, max_tokens: int, estimator: TokenEstimator) -> str:
+    """Keep the oldest and newest parts of a summary input within its budget."""
+    if estimator.estimate_text(text) <= max_tokens:
+        return text
+    marker = "\n... [summary input truncated] ...\n"
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        head_len = middle * 2 // 3
+        tail_len = middle - head_len
+        sample = text[:head_len] + marker + (text[-tail_len:] if tail_len else "")
+        if estimator.estimate_text(sample) <= max_tokens:
+            low = middle
+        else:
+            high = middle - 1
+    head_len = low * 2 // 3
+    tail_len = low - head_len
+    if low <= 0:
+        return ""
+    return text[:head_len] + marker + (text[-tail_len:] if tail_len else "")
 
 
 def _summary_message(checkpoint: ContextCheckpoint) -> Message:
