@@ -172,6 +172,20 @@
 
   <div class="chat-menu" id="chat-menu" role="menu" hidden></div>
 
+  <div class="modal-backdrop" id="rewind" hidden>
+    <div class="dialog rewind-card" role="dialog" aria-modal="true" aria-labelledby="rewind-title">
+      <h2 id="rewind-title">Rewind code changes?</h2>
+      <p class="rewind-summary" id="rewind-summary"></p>
+      <ul class="rewind-files" id="rewind-files"></ul>
+      <p class="rewind-warning" id="rewind-warning" hidden></p>
+      <div class="dialog-actions">
+        <button class="ghost" id="rewind-cancel" type="button">Cancel</button>
+        <button class="secondary" id="rewind-keep" type="button">Conversation only</button>
+        <button class="primary" id="rewind-restore" type="button">Restore code &amp; continue</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="shortcuts" hidden>
     <div class="dialog shortcuts-card" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
       <h2 id="shortcuts-title">Keyboard shortcuts</h2>

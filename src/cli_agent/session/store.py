@@ -81,6 +81,7 @@ class SessionStore:
             lock=root / "lock",
             spills=root / "spills",
             archive=root / "archive",
+            checkpoints=root / "checkpoints",
         )
         store = cls(paths, persist=False)
         store._ephemeral = True

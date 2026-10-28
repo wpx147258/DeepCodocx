@@ -33,6 +33,7 @@
     editing: null,
     searchQuery: "",
     searchTimer: null,
+    rewindResolve: null,
   };
 
   // ------------------------------------------------------------------ utils
@@ -848,13 +849,10 @@
     if (editing) {
       state.busy = true;
       updateComposer();
-      try {
-        const data = await api("/api/rewind", { message_id: editing });
-        applyState(data, { render: true });
-      } catch (error) {
+      const ok = await performRewind({ message_id: editing });
+      if (!ok) {
         state.busy = false;
         updateComposer();
-        toast(error.message);
         return;
       }
       state.busy = false;
@@ -944,18 +942,116 @@
     else body.appendChild(next);
   }
 
+  function closeRewind(value) {
+    if (!$("rewind").hidden) {
+      $("rewind").hidden = true;
+      document.querySelector(".app").inert = false;
+    }
+    const resolve = state.rewindResolve;
+    state.rewindResolve = null;
+    if (resolve) resolve(value);
+  }
+
+  function askRewind(preview) {
+    return new Promise((resolve) => {
+      state.rewindResolve = resolve;
+      const files = preview.files || [];
+      const conflicts = preview.conflicts || [];
+      const partial = preview.partial === true;
+      const incomplete = partial || ((preview.warnings || []).length > 0 && !files.length);
+      $("rewind-title").textContent = files.length
+        ? "Rewind code changes?"
+        : incomplete
+          ? "Some changes were not checkpointed"
+          : "Shell changes cannot be reverted";
+      $("rewind-summary").textContent = files.length
+        ? `${files.length} file${files.length === 1 ? "" : "s"} changed in the turns being removed.`
+        : incomplete
+          ? "Some files were too large or otherwise could not be checkpointed."
+          : "The turns being removed ran shell commands. Their effects are not tracked.";
+      const list = $("rewind-files");
+      list.textContent = "";
+      for (const file of files) {
+        const row = document.createElement("li");
+        row.appendChild(h("span", "rewind-path", file.path));
+        const status = h(
+          "span",
+          `rewind-status${file.conflict ? " conflict" : ""}`,
+          file.conflict ? "conflict" : file.status
+        );
+        row.appendChild(status);
+        list.appendChild(row);
+      }
+      list.hidden = files.length === 0;
+      const warnings = [...(preview.warnings || [])];
+      if (preview.shell_ran) {
+        warnings.unshift("Shell commands ran; only files changed by Write/Edit can be restored.");
+      }
+      if (conflicts.length) {
+        warnings.push("Files marked conflict changed after the turn; restoring overwrites those edits.");
+      }
+      $("rewind-warning").textContent = warnings.join("\n");
+      $("rewind-warning").hidden = warnings.length === 0;
+      const restore = $("rewind-restore");
+      const canRestore = files.length > 0 && preview.restorable !== false;
+      restore.hidden = !canRestore;
+      restore.classList.toggle("danger", conflicts.length > 0);
+      restore.textContent = conflicts.length ? "Restore anyway" : "Restore code & continue";
+      $("rewind-keep").textContent = files.length ? "Conversation only" : "Continue";
+      $("rewind").hidden = false;
+      document.querySelector(".app").inert = true;
+      setTimeout(() => (canRestore ? restore : $("rewind-keep")).focus(), 30);
+    });
+  }
+
+  async function performRewind(target) {
+    let preview;
+    try {
+      preview = await api("/api/rewind/preview", target);
+    } catch (error) {
+      toast(error.message);
+      return false;
+    }
+    let choice = null;
+    if (
+      preview.has_changes ||
+      preview.shell_ran ||
+      preview.partial ||
+      (preview.warnings || []).length
+    ) {
+      choice = await askRewind(preview);
+      if (!choice) return false;
+    }
+    const payload = { ...target };
+    if (choice === "keep") payload.files = "keep";
+    if (choice === "restore" || choice === "force") payload.files = "restore";
+    if (choice === "force") payload.force = true;
+    try {
+      const data = await api("/api/rewind", payload);
+      applyState(data, { render: true });
+      if (data.rewind?.restore?.warnings?.length) {
+        toast("Rewind completed with warnings.");
+      } else if (data.rewind?.restore?.restored?.length) {
+        toast(
+          `Restored ${data.rewind.restore.restored.length} file${data.rewind.restore.restored.length === 1 ? "" : "s"}.`
+        );
+      }
+      return true;
+    } catch (error) {
+      toast(error.message);
+      return false;
+    }
+  }
+
   async function regenerateLastTurn() {
     if (state.busy) { toast("Stop the current turn first."); return; }
     state.busy = true;
     state.stopping = false;
     updateComposer();
-    try {
-      const data = await api("/api/rewind", { last_user: true });
-      applyState(data, { render: true });
-    } catch (error) {
+    const ok = await performRewind({ last_user: true });
+    if (!ok) {
       state.busy = false;
       updateComposer();
-      toast(error.message);
       return;
     }
     state.busy = false;
@@ -1812,6 +1908,15 @@
     $("theme-toggle").addEventListener("click", () => {
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
     });
+    $("rewind-cancel").addEventListener("click", () => closeRewind(null));
+    $("rewind-keep").addEventListener("click", () => closeRewind("keep"));
+    $("rewind-restore").addEventListener("click", () => {
+      const conflicts = $("rewind-restore").classList.contains("danger");
+      closeRewind(conflicts ? "force" : "restore");
+    });
+    $("rewind").addEventListener("click", (event) => {
+      if (event.target === $("rewind")) closeRewind(null);
+    });
     $("shortcuts-button").addEventListener("click", openShortcuts);
     $("shortcuts-close").addEventListener("click", closeShortcuts);
     $("shortcuts").addEventListener("click", (event) => {
@@ -1906,6 +2011,10 @@
       }
       if (!$("chat-menu").hidden) {
         if (event.key === "Escape") { event.preventDefault(); closeChatMenu(); }
+        return;
+      }
+      if (!$("rewind").hidden) {
+        if (event.key === "Escape") { event.preventDefault(); closeRewind(null); }
         return;
       }
       if (!$("shortcuts").hidden) {

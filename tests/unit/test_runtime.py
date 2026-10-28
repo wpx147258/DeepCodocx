@@ -717,3 +717,27 @@ async def test_context_tokens_estimates_before_the_first_request(
         assert runtime.context_tokens < runtime.context_window
     finally:
         await runtime.close()
+
+
+async def test_write_tool_creates_a_restorable_checkpoint(tmp_path: Path) -> None:
+    from cli_agent.tools.builtin.files import WriteTool
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[WriteTool()])
+    await _consume(runtime, "write a note")
+    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "one"
+
+    preview = runtime.preview_checkpoints(last_user=True)
+    assert preview.has_changes
+    assert preview.files[0].path == "note.txt"
+    assert preview.files[0].status == "created"
+
+    result = runtime.restore_checkpoints(last_user=True)
+    assert result.restored == ("note.txt",)
+    assert not (tmp_path / "note.txt").exists()
+    await runtime.close()

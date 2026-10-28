@@ -48,6 +48,7 @@ from .providers.base import (
     ThinkingConfig,
 )
 from .runtime_attempt import Attempt, stream_attempt
+from .session.checkpoints import CheckpointPreview, CheckpointStore, RestoreResult
 from .session.store import SessionStore
 from .tools.base import ToolContext, ToolResult
 from .tools.execution import ToolExecutor
@@ -105,6 +106,7 @@ class RuntimeDeps:
     provider_factory: Callable[[str, str], ProviderBuild] | None = None
     thinking: ThinkingConfig | None = None
     provider_slot: ProviderSlot | None = None
+    checkpoints: CheckpointStore | None = None
 
 
 @dataclass
@@ -223,24 +225,23 @@ class AgentRuntime:
         *,
         images: Sequence[ImageBlock] = (),
     ) -> AsyncIterator[AgentEvent]:
+        turn_id: str | None = None
         if text is not None or images:
             message = user_message(text or "", images=images)
             self._append(message)
             self._active_request = text or ""
+            turn_id = message.id
         elif not self._deps.transcript.messages:
             yield AgentNotice("Nothing to continue.")
             return
         else:
-            last = next(
-                (
-                    message
-                    for message in reversed(self._deps.transcript.messages)
-                    if message.role == "user" and message.text().strip()
-                ),
-                None,
-            )
+            last = self._last_user_message()
             if last is not None:
                 self._active_request = last.text()
+                turn_id = last.id
+
+        if self._deps.checkpoints is not None and turn_id is not None:
+            self._deps.checkpoints.begin(turn_id)
 
         recovery = _Recovery()
         turns = 0
@@ -327,29 +328,75 @@ class AgentRuntime:
 
     async def rewind_to(self, message_id: str) -> None:
         """Drop a user message and everything after it (for edit-and-resend)."""
+        keep, _ = self._rewind_target(message_id=message_id)
+        self._rewind(keep)
+
+    async def rewind_last_user_turn(self) -> None:
+        """Keep the latest user turn and drop the assistant/tool tail."""
+        keep, _ = self._rewind_target(last_user=True)
+        self._rewind(keep)
+
+    def preview_checkpoints(
+        self, *, message_id: str | None = None, last_user: bool = False
+    ) -> CheckpointPreview:
+        if self._deps.checkpoints is None:
+            return CheckpointPreview()
+        _, turn_ids = self._rewind_target(
+            message_id=message_id, last_user=last_user
+        )
+        return self._deps.checkpoints.preview(turn_ids)
+
+    def restore_checkpoints(
+        self,
+        *,
+        message_id: str | None = None,
+        last_user: bool = False,
+        force: bool = False,
+    ) -> RestoreResult:
+        if self._deps.checkpoints is None:
+            return RestoreResult()
+        _, turn_ids = self._rewind_target(
+            message_id=message_id, last_user=last_user
+        )
+        return self._deps.checkpoints.restore(turn_ids, force=force)
+
+    def _rewind_target(
+        self, *, message_id: str | None = None, last_user: bool = False
+    ) -> tuple[int, list[str]]:
+        messages = self._deps.transcript.messages
+        if last_user:
+            index = next(
+                (
+                    position
+                    for position in range(len(messages) - 1, -1, -1)
+                    if messages[position].role == "user"
+                    and _has_user_content(messages[position])
+                ),
+                None,
+            )
+            if index is None:
+                raise ValueError("no user message to regenerate")
+            return index + 1, [messages[index].id]
+        if not message_id:
+            raise ValueError("message_id is required")
         index = self._deps.transcript.index_of(message_id)
         if index is None:
             raise ValueError("message not found")
-        message = self._deps.transcript.messages[index]
+        message = messages[index]
         if message.role != "user":
             raise ValueError("only user messages can be edited")
-        self._rewind(index)
+        turn_ids = [item.id for item in messages[index:] if item.role == "user"]
+        return index, turn_ids
 
-    async def rewind_last_user_turn(self) -> None:
-        """Keep the latest user text and drop the assistant/tool tail."""
-        messages = self._deps.transcript.messages
-        index = next(
+    def _last_user_message(self) -> Message | None:
+        return next(
             (
-                position
-                for position in range(len(messages) - 1, -1, -1)
-                if messages[position].role == "user"
-                and messages[position].text().strip()
+                message
+                for message in reversed(self._deps.transcript.messages)
+                if message.role == "user" and _has_user_content(message)
             ),
             None,
         )
-        if index is None:
-            raise ValueError("no user message to regenerate")
-        self._rewind(index + 1)
 
     def _rewind(self, keep: int) -> None:
         messages = self._deps.transcript.messages
@@ -549,6 +596,12 @@ class AgentRuntime:
             recovery.reactive_requested = True
             return "reactive", 0.0
         return "fail", 0.0
+
+
+def _has_user_content(message: Message) -> bool:
+    return any(
+        isinstance(block, (TextBlock, ImageBlock)) for block in message.content
+    )
 
 
 def _to_result_block(tool_use_id: str, result: ToolResult) -> ToolResultBlock:

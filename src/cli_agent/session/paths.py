@@ -32,6 +32,7 @@ class SessionPaths:
     lock: Path
     spills: Path
     archive: Path
+    checkpoints: Path
 
     @classmethod
     def for_session(cls, paths: AppPaths, session_id: str) -> SessionPaths:
@@ -45,6 +46,7 @@ class SessionPaths:
             lock=root / "lock",
             spills=root / "spills",
             archive=root / "archive",
+            checkpoints=root / "checkpoints",
         )
 
 

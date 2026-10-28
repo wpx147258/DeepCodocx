@@ -61,6 +61,12 @@
   Serve the page with a strict CSP and keep the default loopback bind. Non-local
   binds require the API token; never disable it silently. UI-only preferences (sidebar
   width, search text, theme) stay client-side; chat mutations go through the API.
+- Code checkpoints live under the session's `checkpoints/` directory and snapshot
+  files only before Write/Edit runs in a user turn. Restoring must validate the
+  current post-hash, refuse to overwrite manual changes unless explicitly forced,
+  and never follow symlinks. Bash effects are not reversible; surface that warning.
+  Rewind the transcript only after the code restore decision, and keep fork/delete
+  behaviour consistent with the session directory.
 - UI-only session state (custom title, archived flag) lives in `meta.json` and is
   changed atomically; never rewrite `session.jsonl` for display concerns, because that
   would invalidate the prompt cache. Archive is reversible; delete removes the session

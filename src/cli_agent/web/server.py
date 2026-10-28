@@ -871,6 +871,27 @@ def create_app(
             return JSONResponse({"error": f"could not delete chat: {exc}"}, status_code=500)
         return JSONResponse({"ok": True})
 
+    def rewind_target(body: dict[str, Any]) -> dict[str, Any]:
+        if bool(body.get("last_user", False)):
+            return {"last_user": True}
+        message_id = str(body.get("message_id", "")).strip()
+        if not message_id:
+            raise ValueError("message_id is required")
+        return {"message_id": message_id}
+
+    async def rewind_preview(request: Request) -> Response:
+        if host.busy:
+            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        try:
+            target = rewind_target(body)
+            preview = host.runtime.preview_checkpoints(**target)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(preview.to_dict())
+
     async def rewind(request: Request) -> Response:
         if host.busy:
             return JSONResponse({"error": "stop the current turn first"}, status_code=409)
@@ -878,18 +899,49 @@ def create_app(
         if body is None:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         try:
-            if bool(body.get("last_user", False)):
+            target = rewind_target(body)
+            preview = host.runtime.preview_checkpoints(**target)
+            files_choice = body.get("files")
+            restored = None
+            if (
+                preview.has_changes
+                or preview.shell_ran
+                or preview.partial
+                or preview.warnings
+            ):
+                if files_choice not in ("restore", "keep"):
+                    return JSONResponse(
+                        {
+                            "error": "rewind requires a files decision",
+                            "preview": preview.to_dict(),
+                        },
+                        status_code=409,
+                    )
+                if files_choice == "restore":
+                    restored = host.runtime.restore_checkpoints(
+                        **target, force=bool(body.get("force", False))
+                    )
+                    if restored.aborted:
+                        return JSONResponse(
+                            {
+                                "error": "code restore was not completed",
+                                "preview": preview.to_dict(),
+                                "restore": restored.to_dict(),
+                            },
+                            status_code=409,
+                        )
+            if target.get("last_user"):
                 await host.runtime.rewind_last_user_turn()
             else:
-                message_id = str(body.get("message_id", "")).strip()
-                if not message_id:
-                    return JSONResponse(
-                        {"error": "message_id is required"}, status_code=400
-                    )
-                await host.runtime.rewind_to(message_id)
+                await host.runtime.rewind_to(str(target["message_id"]))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(host.state_payload())
+        payload = host.state_payload()
+        payload["rewind"] = {
+            "preview": preview.to_dict(),
+            "restore": restored.to_dict() if restored is not None else None,
+        }
+        return JSONResponse(payload)
 
     async def model(request: Request) -> Response:
         if host.busy:
@@ -959,6 +1011,7 @@ def create_app(
         Route("/api/new", new_session, methods=["POST"]),
         Route("/api/open", open_session, methods=["POST"]),
         Route("/api/rewind", rewind, methods=["POST"]),
+        Route("/api/rewind/preview", rewind_preview, methods=["POST"]),
         Route("/api/model", model, methods=["POST"]),
         Route("/api/auto", auto, methods=["POST"]),
         Route("/api/compact", compact, methods=["POST"]),

@@ -30,6 +30,7 @@ def _paths(root: Path) -> SessionPaths:
         lock=root / "lock",
         spills=root / "spills",
         archive=root / "archive",
+        checkpoints=root / "checkpoints",
     )
 
 

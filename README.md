@@ -92,9 +92,12 @@ same `AgentRuntime`:
   fresh chat opens first). Archived chats stay on disk under "Show archived" and can
   be restored; rename/archive live in `meta.json`, not in the append-only transcript;
 - paste, drop, or attach PNG/JPEG/GIF/WebP images (four per message, 5 MiB each);
-  edit any user message and resend (the tail is rewound), or regenerate the last
-  answer; search chats by title and message content, export the current chat as
-  Markdown or JSON, and open the keyboard-shortcuts panel with `Ctrl/⌘ + /`;
+  edit any user message and resend, or regenerate the last answer. Before a
+  rewind, Write/Edit file changes from the removed turns are previewed: restore
+  them, keep them, or cancel; manually changed files are conflicts and require an
+  explicit force. Shell side effects are reported but not reversible. Search chats
+  by title and message content, export the current chat as Markdown or JSON, and
+  open the keyboard-shortcuts panel with `Ctrl/⌘ + /`;
 - "New chat" creates a new session instead of clearing the current one;
 - cancellation stops the running turn through the runtime, not by killing the server.
 

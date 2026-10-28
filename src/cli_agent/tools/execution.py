@@ -88,6 +88,20 @@ class ToolExecutor:
         tool = prepared.tool
         if tool is None:  # pragma: no cover - guarded by PreparedCall.runnable
             return ToolResult.error("Error: tool was not prepared")
+        checkpoint = ctx.checkpoints
+        path_arg = tool.spec.path_arg
+        raw_path = (
+            prepared.call.input.get(path_arg)
+            if tool.spec.category == "write" and path_arg
+            else None
+        )
+        tracked_path = raw_path if isinstance(raw_path, str) else None
+        if checkpoint is not None and tracked_path is not None:
+            checkpoint.capture(tracked_path)
+        if checkpoint is not None and tool.spec.category == "shell":
+            command = prepared.call.input.get("command")
+            if isinstance(command, str):
+                checkpoint.note_shell(command)
         try:
             result = await tool.run(prepared.call.input, ctx)
         except asyncio.CancelledError:
@@ -95,6 +109,9 @@ class ToolExecutor:
         except Exception as exc:  # noqa: BLE001 - tool failure is data
             logger.exception("tool %s failed", prepared.call.name)
             return ToolResult.error(f"Error: {type(exc).__name__}: {exc}")
+        finally:
+            if checkpoint is not None and tracked_path is not None:
+                checkpoint.record_after(tracked_path)
 
         if not isinstance(result, ToolResult):
             return ToolResult.error(

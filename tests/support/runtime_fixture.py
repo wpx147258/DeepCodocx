@@ -16,6 +16,7 @@ from cli_agent.messages import Usage
 from cli_agent.permissions.policy import Asker, PermissionMode, PermissionPolicy
 from cli_agent.providers.base import ModelProfile, ThinkingConfig
 from cli_agent.runtime import AgentRuntime, RuntimeDeps
+from cli_agent.session.checkpoints import CheckpointStore
 from cli_agent.session.paths import SessionPaths
 from cli_agent.session.store import SessionStore
 from cli_agent.tools.base import Tool, ToolContext, ToolResult, ToolSpec
@@ -112,6 +113,7 @@ def make_runtime(
         lock=root / "lock",
         spills=root / "spills",
         archive=root / "archive",
+        checkpoints=root / "checkpoints",
     )
     session = SessionStore(paths, persist=False)
     estimator = estimator or TokenEstimator()
@@ -121,6 +123,7 @@ def make_runtime(
         summarize=fake_summarize,
         checkpoint=checkpoint,
     )
+    checkpoints = CheckpointStore(paths, tmp_path)
     profile = profile or ModelProfile(
         provider_name="fake",
         provider_kind="anthropic_compat",
@@ -139,7 +142,12 @@ def make_runtime(
         context=pipeline,
         prompt_builder=PromptBuilder(),
         session=session,
-        tool_context=ToolContext(cwd=tmp_path, session_id="test", data_dir=tmp_path),
+        tool_context=ToolContext(
+            cwd=tmp_path,
+            session_id="test",
+            data_dir=tmp_path,
+            checkpoints=checkpoints,
+        ),
         skills=SkillLoader([]),
         project_instructions="",
         estimator=estimator,
@@ -147,5 +155,6 @@ def make_runtime(
         max_turns=max_turns,
         memory=memory,
         thinking=thinking,
+        checkpoints=checkpoints,
     )
     return AgentRuntime(deps), session

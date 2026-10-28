@@ -1062,6 +1062,37 @@ html[data-theme="light"] .icon-moon { display: none; }
 .dialog-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dialog-error { margin: 9px 0 0; color: var(--danger); font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.rewind-card { width: min(100%, 540px); }
+.rewind-summary { margin: 10px 0 0; color: var(--ink-soft); font-size: 13px; }
+.rewind-files {
+  margin: 12px 0 0; padding: 0; list-style: none;
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg-soft);
+}
+.rewind-files li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11.5px;
+}
+.rewind-files li:last-child { border-bottom: 0; }
+.rewind-files .rewind-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rewind-files .rewind-status {
+  padding: 1px 6px; border-radius: 5px;
+  background: var(--surface-2); color: var(--muted);
+  font-family: var(--sans); font-size: 10px; font-weight: 650; text-transform: uppercase;
+}
+.rewind-files .rewind-status.conflict { background: var(--danger-soft); color: var(--danger); }
+.rewind-warning {
+  margin: 10px 0 0; padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  border-radius: 8px;
+  background: var(--danger-soft); color: var(--danger);
+  font-size: 12px; line-height: 1.45;
+  white-space: pre-line;
+}
+.dialog-actions .secondary { border-color: transparent; background: var(--surface-2); color: var(--ink-soft); }
 .shortcut-list { margin: 16px 0 0; display: flex; flex-direction: column; gap: 8px; }
 .shortcut-list div {
   display: flex; align-items: baseline; justify-content: space-between; gap: 14px;

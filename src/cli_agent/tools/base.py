@@ -39,11 +39,22 @@ class ToolResult:
         return "".join(block.text for block in self.content if isinstance(block, TextBlock))
 
 
+class CheckpointSink(Protocol):
+    """Best-effort hook for per-turn file checkpoints."""
+
+    def capture(self, path: str) -> None: ...
+
+    def record_after(self, path: str) -> None: ...
+
+    def note_shell(self, command: str) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ToolContext:
     cwd: Path
     session_id: str
     data_dir: Path
+    checkpoints: CheckpointSink | None = None
 
 
 class Tool(Protocol):

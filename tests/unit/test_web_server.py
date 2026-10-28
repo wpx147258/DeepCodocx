@@ -15,6 +15,8 @@ from cli_agent.providers.base import ModelProfile
 from cli_agent.session.meta import read_session_meta, update_session_meta
 from cli_agent.session.paths import SessionPaths
 from cli_agent.session.store import SessionStore
+from cli_agent.tools.builtin.bash import BashTool
+from cli_agent.tools.builtin.files import WriteTool
 from cli_agent.web import server as web_server
 from cli_agent.web.server import (
     STATIC_DIR,
@@ -644,3 +646,113 @@ def test_image_only_session_gets_a_title(tmp_path: Path) -> None:
     summaries = session_summaries(paths, current="x")
     assert summaries[0]["id"] == session_id
     assert summaries[0]["title"] == "Image attachment"
+
+
+async def test_rewind_preview_and_restore_created_file(
+    client_factory, tmp_path: Path
+) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "write a note"})
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "one"
+
+        preview = await client.post("/api/rewind/preview", json={"last_user": True})
+        assert preview.status_code == 200
+        body = preview.json()
+        assert body["has_changes"] is True
+        assert body["files"][0]["path"] == "note.txt"
+        assert body["files"][0]["status"] == "created"
+
+        blocked = await client.post("/api/rewind", json={"last_user": True})
+        assert blocked.status_code == 409
+        assert blocked.json()["preview"]["has_changes"] is True
+
+        restored = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "restore"}
+        )
+        assert restored.status_code == 200
+        assert restored.json()["rewind"]["restore"]["restored"] == ["note.txt"]
+        assert not (tmp_path / "note.txt").exists()
+        state = restored.json()
+        assert state["messages"][-1]["role"] == "user"
+
+
+async def test_rewind_can_keep_files(client_factory, tmp_path: Path) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "write a note"})
+        response = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "keep"}
+        )
+        assert response.status_code == 200
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "one"
+
+
+async def test_rewind_conflict_requires_force(client_factory, tmp_path: Path) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "write a note"})
+        (tmp_path / "note.txt").write_text("manual", encoding="utf-8")
+        preview = (
+            await client.post("/api/rewind/preview", json={"last_user": True})
+        ).json()
+        assert preview["conflicts"] == ["note.txt"]
+
+        blocked = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "restore"}
+        )
+        assert blocked.status_code == 409
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "manual"
+
+        forced = await client.post(
+            "/api/rewind",
+            json={"last_user": True, "files": "restore", "force": True},
+        )
+        assert forced.status_code == 200
+        assert not (tmp_path / "note.txt").exists()
+
+
+async def test_shell_only_rewind_requires_acknowledgement(
+    client_factory, tmp_path: Path
+) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Bash", {"command": "touch shell.txt"})])],
+            [text_response("done")],
+        ],
+        tools=[BashTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "make a file"})
+        preview = (
+            await client.post("/api/rewind/preview", json={"last_user": True})
+        ).json()
+        assert preview["shell_ran"] is True
+        assert preview["files"] == []
+
+        blocked = await client.post("/api/rewind", json={"last_user": True})
+        assert blocked.status_code == 409
+
+        kept = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "keep"}
+        )
+        assert kept.status_code == 200
+        assert (tmp_path / "shell.txt").exists()

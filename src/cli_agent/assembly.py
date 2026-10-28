@@ -38,6 +38,7 @@ from .providers.base import (
 )
 from .providers.factory import build_provider
 from .runtime import AgentRuntime, ProviderSlot, RuntimeDeps
+from .session.checkpoints import CheckpointStore
 from .session.fork import fork_session
 from .session.paths import latest_session_id
 from .session.store import SessionStore
@@ -286,10 +287,12 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     )
     spill = SpillStore(store.spills_dir)
     executor = ToolExecutor(registry, spill=spill)
+    checkpoints = CheckpointStore(store.paths, config.paths.cwd)
     tool_context = ToolContext(
         cwd=config.paths.cwd,
         session_id=store.session_id,
         data_dir=config.paths.project_dir,
+        checkpoints=checkpoints,
     )
     estimator = TokenEstimator()
 
@@ -345,6 +348,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         provider_factory=provider_factory,
         thinking=thinking,
         provider_slot=slot,
+        checkpoints=checkpoints,
     )
     runtime = AgentRuntime(deps)
     runtime.restore_permission(initial_mode, initial_auto_previous)
