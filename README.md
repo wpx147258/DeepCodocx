@@ -95,7 +95,8 @@ same `AgentRuntime`:
   edit any user message and resend, or regenerate the last answer. Before a
   rewind, Write/Edit file changes from the removed turns are previewed: restore
   them, keep them, or cancel; manually changed files are conflicts and require an
-  explicit force. Shell side effects are reported but not reversible. Search chats
+  explicit force. Shell side effects are reported (with the commands) but are not
+  reversible. Search chats
   by title and message content, export the current chat as Markdown or JSON, and
   open the keyboard-shortcuts panel with `Ctrl/⌘ + /`;
 - "New chat" creates a new session instead of clearing the current one;

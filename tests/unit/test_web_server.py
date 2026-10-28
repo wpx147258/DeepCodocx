@@ -20,6 +20,7 @@ from cli_agent.tools.builtin.files import WriteTool
 from cli_agent.web import server as web_server
 from cli_agent.web.server import (
     STATIC_DIR,
+    TurnBusy,
     WebAsker,
     WebHost,
     _model_choices,
@@ -756,3 +757,80 @@ async def test_shell_only_rewind_requires_acknowledgement(
         )
         assert kept.status_code == 200
         assert (tmp_path / "shell.txt").exists()
+
+
+async def test_continue_keeps_the_earlier_checkpoint(client_factory, tmp_path: Path) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "a.txt", "content": "a"})])],
+            [text_response("first")],
+            [tool_response([("t2", "Write", {"path": "b.txt", "content": "b"})])],
+            [text_response("second")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "first"})
+        kept = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "keep"}
+        )
+        assert kept.status_code == 200
+        user_id = kept.json()["messages"][0]["id"]
+
+        await client.post("/api/chat", json={"continue": True})
+        preview = (
+            await client.post("/api/rewind/preview", json={"message_id": user_id})
+        ).json()
+        assert {item["path"] for item in preview["files"]} == {"a.txt", "b.txt"}
+
+        restored = await client.post(
+            "/api/rewind",
+            json={"message_id": user_id, "files": "restore"},
+        )
+        assert restored.status_code == 200
+        assert not (tmp_path / "a.txt").exists()
+        assert not (tmp_path / "b.txt").exists()
+
+
+async def test_corrupt_blob_does_not_truncate_the_transcript(
+    client_factory, tmp_path: Path
+) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    (tmp_path / "note.txt").write_text("before", encoding="utf-8")
+    async with client:
+        await client.post("/api/chat", json={"text": "write"})
+        blob = next((tmp_path / "session" / "checkpoints" / "blobs").glob("*/*"))
+        blob.write_bytes(b"corrupt")
+        preview = (
+            await client.post("/api/rewind/preview", json={"last_user": True})
+        ).json()
+        assert preview["restorable"] is False
+
+        blocked = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "restore"}
+        )
+        assert blocked.status_code == 409
+        state = (await client.get("/api/bootstrap")).json()
+        assert [message["role"] for message in state["messages"]] == [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
+
+
+async def test_start_turn_reserves_busy_synchronously(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path, FakeProvider([[text_response("ok")]]))
+    host = WebHost(bundle)
+    host.start_turn("hi")
+    assert host.busy is True
+    with pytest.raises(TurnBusy):
+        host.start_turn("again")
+    await host.cancel_turn()
+    await bundle.runtime.close()

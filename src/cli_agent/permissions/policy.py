@@ -168,10 +168,10 @@ class PermissionPolicy:
         raw = tool_input.get(spec.path_arg)
         if not isinstance(raw, str) or not raw:
             return None
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            path = self.workspace / path
         try:
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                path = self.workspace / path
             resolved = path.resolve(strict=False)
         except (OSError, RuntimeError):
             return raw

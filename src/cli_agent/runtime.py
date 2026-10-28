@@ -328,8 +328,10 @@ class AgentRuntime:
 
     async def rewind_to(self, message_id: str) -> None:
         """Drop a user message and everything after it (for edit-and-resend)."""
-        keep, _ = self._rewind_target(message_id=message_id)
+        keep, turn_ids = self._rewind_target(message_id=message_id)
         self._rewind(keep)
+        if self._deps.checkpoints is not None:
+            self._deps.checkpoints.discard(turn_ids)
 
     async def rewind_last_user_turn(self) -> None:
         """Keep the latest user turn and drop the assistant/tool tail."""
@@ -358,7 +360,10 @@ class AgentRuntime:
         _, turn_ids = self._rewind_target(
             message_id=message_id, last_user=last_user
         )
-        return self._deps.checkpoints.restore(turn_ids, force=force)
+        result = self._deps.checkpoints.restore(turn_ids, force=force)
+        if not result.aborted:
+            self._deps.checkpoints.mark_restored(turn_ids)
+        return result
 
     def _rewind_target(
         self, *, message_id: str | None = None, last_user: bool = False
@@ -385,7 +390,11 @@ class AgentRuntime:
         message = messages[index]
         if message.role != "user":
             raise ValueError("only user messages can be edited")
-        turn_ids = [item.id for item in messages[index:] if item.role == "user"]
+        turn_ids = [
+            item.id
+            for item in messages[index:]
+            if item.role == "user" and _has_user_content(item)
+        ]
         return index, turn_ids
 
     def _last_user_message(self) -> Message | None:

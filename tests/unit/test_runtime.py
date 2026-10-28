@@ -741,3 +741,61 @@ async def test_write_tool_creates_a_restorable_checkpoint(tmp_path: Path) -> Non
     assert result.restored == ("note.txt",)
     assert not (tmp_path / "note.txt").exists()
     await runtime.close()
+
+
+async def test_bad_checkpoint_path_does_not_break_the_turn(tmp_path: Path) -> None:
+    from cli_agent.tools.builtin.files import WriteTool
+
+    provider = FakeProvider(
+        [
+            [
+                tool_response(
+                    [("t1", "Write", {"path": "~definitely-no-such-user/x", "content": "x"})]
+                )
+            ],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[WriteTool()])
+    events = [event async for event in runtime.run_turn("write")]
+    finished = [event for event in events if isinstance(event, AgentToolFinished)]
+    assert finished and finished[0].is_error
+    assert isinstance(events[-1], AgentTurnFinished)
+    await runtime.close()
+
+
+async def test_continuing_same_turn_keeps_earlier_checkpoint(tmp_path: Path) -> None:
+    from cli_agent.tools.builtin.files import WriteTool
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Write", {"path": "a.txt", "content": "a"})])],
+            [text_response("first")],
+            [tool_response([("t2", "Write", {"path": "b.txt", "content": "b"})])],
+            [text_response("second")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[WriteTool()])
+    await _consume(runtime, "first")
+    async for _ in runtime.run_turn(None):
+        pass
+    preview = runtime.preview_checkpoints(last_user=True)
+    assert {item.path for item in preview.files} == {"a.txt", "b.txt"}
+    await runtime.close()
+
+
+async def test_edit_rewind_discards_orphan_checkpoints(tmp_path: Path) -> None:
+    from cli_agent.tools.builtin.files import WriteTool
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Write", {"path": "a.txt", "content": "a"})])],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[WriteTool()])
+    await _consume(runtime, "write")
+    user_id = runtime.messages[0].id
+    await runtime.rewind_to(user_id)
+    assert not list((tmp_path / "session" / "checkpoints" / "turns").glob("*.json"))
+    await runtime.close()

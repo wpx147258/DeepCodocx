@@ -257,18 +257,20 @@ class WebHost:
         finally:
             await queue.put(_END)
 
-    async def stream_turn(
-        self,
-        text: str | None,
-        request: Request,
-        *,
-        images: tuple[ImageBlock, ...] = (),
-    ) -> AsyncIterator[str]:
+    def start_turn(
+        self, text: str | None, images: tuple[ImageBlock, ...] = ()
+    ) -> asyncio.Queue[Any]:
+        """Reserve the turn synchronously so rewind cannot interleave."""
         if self.busy:
             raise TurnBusy
         queue: asyncio.Queue[Any] = asyncio.Queue()
         self._queue = queue
         self._turn = asyncio.create_task(self._run_turn(text, images, queue))
+        return queue
+
+    async def stream_started(
+        self, queue: asyncio.Queue[Any], request: Request
+    ) -> AsyncIterator[str]:
         disconnect = asyncio.create_task(_wait_for_disconnect(request))
         try:
             yield _sse(
@@ -313,6 +315,17 @@ class WebHost:
                 if not future.done():
                     future.set_result("no")
             self._permissions.clear()
+
+    async def stream_turn(
+        self,
+        text: str | None,
+        request: Request,
+        *,
+        images: tuple[ImageBlock, ...] = (),
+    ) -> AsyncIterator[str]:
+        queue = self.start_turn(text, images)
+        async for chunk in self.stream_started(queue, request):
+            yield chunk
 
 
 class TurnBusy(RuntimeError):
@@ -698,13 +711,19 @@ def create_app(
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         if host.busy:
             return JSONResponse({"error": "a turn is already running"}, status_code=409)
-        if bool(body.get("continue", False)):
+        if body.get("continue") is True:
             if not host.runtime.messages:
                 return JSONResponse(
                     {"error": "nothing to continue"}, status_code=400
                 )
+            try:
+                queue = host.start_turn(None)
+            except TurnBusy:
+                return JSONResponse(
+                    {"error": "a turn is already running"}, status_code=409
+                )
             return StreamingResponse(
-                host.stream_turn(None, request),
+                host.stream_started(queue, request),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache, no-transform",
@@ -719,8 +738,14 @@ def create_app(
             return JSONResponse({"error": str(exc)}, status_code=400)
         if not text and not images:
             return JSONResponse({"error": "text or an image is required"}, status_code=400)
+        try:
+            queue = host.start_turn(text, images)
+        except TurnBusy:
+            return JSONResponse(
+                {"error": "a turn is already running"}, status_code=409
+            )
         return StreamingResponse(
-            host.stream_turn(text, request, images=images),
+            host.stream_started(queue, request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
@@ -872,7 +897,7 @@ def create_app(
         return JSONResponse({"ok": True})
 
     def rewind_target(body: dict[str, Any]) -> dict[str, Any]:
-        if bool(body.get("last_user", False)):
+        if body.get("last_user") is True:
             return {"last_user": True}
         message_id = str(body.get("message_id", "")).strip()
         if not message_id:
@@ -880,11 +905,11 @@ def create_app(
         return {"message_id": message_id}
 
     async def rewind_preview(request: Request) -> Response:
-        if host.busy:
-            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
         body = await _json_object(request)
         if body is None:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if host.busy:
+            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
         try:
             target = rewind_target(body)
             preview = host.runtime.preview_checkpoints(**target)
@@ -893,11 +918,11 @@ def create_app(
         return JSONResponse(preview.to_dict())
 
     async def rewind(request: Request) -> Response:
-        if host.busy:
-            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
         body = await _json_object(request)
         if body is None:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if host.busy:
+            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
         try:
             target = rewind_target(body)
             preview = host.runtime.preview_checkpoints(**target)
@@ -919,7 +944,7 @@ def create_app(
                     )
                 if files_choice == "restore":
                     restored = host.runtime.restore_checkpoints(
-                        **target, force=bool(body.get("force", False))
+                        **target, force=body.get("force") is True
                     )
                     if restored.aborted:
                         return JSONResponse(

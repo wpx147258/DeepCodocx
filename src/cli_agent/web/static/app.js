@@ -986,6 +986,9 @@
       const warnings = [...(preview.warnings || [])];
       if (preview.shell_ran) {
         warnings.unshift("Shell commands ran; only files changed by Write/Edit can be restored.");
+        if ((preview.commands || []).length) {
+          warnings.push(`Shell: ${preview.commands.slice(0, 4).join(" · ")}`);
+        }
       }
       if (conflicts.length) {
         warnings.push("Files marked conflict changed after the turn; restoring overwrites those edits.");

@@ -287,7 +287,11 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
     )
     spill = SpillStore(store.spills_dir)
     executor = ToolExecutor(registry, spill=spill)
-    checkpoints = CheckpointStore(store.paths, config.paths.cwd)
+    checkpoints = (
+        CheckpointStore(store.paths, config.paths.cwd)
+        if options.persist
+        else None
+    )
     tool_context = ToolContext(
         cwd=config.paths.cwd,
         session_id=store.session_id,

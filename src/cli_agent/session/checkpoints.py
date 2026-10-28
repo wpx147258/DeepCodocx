@@ -32,6 +32,7 @@ MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_TURN_BYTES = 50 * 1024 * 1024
 _SHELL_COMMAND_CHARS = 200
 _TURN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_HASH = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(slots=True)
@@ -162,22 +163,39 @@ class CheckpointStore:
     # ------------------------------------------------------------------ capture
 
     def begin(self, turn_id: str) -> None:
-        if not _TURN_ID.fullmatch(turn_id) or ".." in turn_id:
-            logger.warning("ignoring invalid checkpoint turn id: %r", turn_id)
-            self._turn_id = None
-            return
-        self._turn_id = turn_id
         self._files = {}
         self._commands = []
         self._warnings = []
         self._partial = False
         self._bytes = 0
         self._outside_warned = set()
+        if not _TURN_ID.fullmatch(turn_id) or ".." in turn_id:
+            logger.warning("ignoring invalid checkpoint turn id: %r", turn_id)
+            self._turn_id = None
+            return
+        self._turn_id = turn_id
+        load_warnings: list[str] = []
         try:
-            self._manifest_path(turn_id).unlink(missing_ok=True)
-        except OSError:
-            logger.debug("could not replace old checkpoint manifest", exc_info=True)
-        self._prune()
+            existing = self._load_manifests([turn_id], load_warnings)
+        except Exception:  # noqa: BLE001 - checkpointing is best effort
+            logger.warning("could not load existing checkpoint", exc_info=True)
+            existing = []
+        if existing:
+            manifest = existing[0]
+            self._files = dict(manifest.files)
+            self._commands = list(manifest.commands)
+            self._warnings = [*manifest.warnings, *load_warnings]
+            self._partial = manifest.partial
+            for entry in self._files.values():
+                if entry.before_hash:
+                    with contextlib.suppress(OSError):
+                        self._bytes += self._blob_path(entry.before_hash).stat().st_size
+        else:
+            self._warnings = list(load_warnings)
+        try:
+            self._prune(keep_turn_id=turn_id)
+        except Exception:  # noqa: BLE001 - never fail a turn on maintenance
+            logger.warning("checkpoint prune failed", exc_info=True)
 
     def capture(self, raw_path: str) -> None:
         """Snapshot a path before a write tool changes it."""
@@ -196,6 +214,10 @@ class CheckpointStore:
             info = None
         except OSError:
             self._warn(f"{rel}: cannot stat; not checkpointed")
+            self._write()
+            return
+        if info is not None and info.st_nlink > 1:
+            self._warn(f"{rel}: hard-linked file; not checkpointed")
             self._write()
             return
         if info is not None and info.st_size > self.max_file_bytes:
@@ -217,14 +239,17 @@ class CheckpointStore:
         if data is not None and len(data) > self.max_file_bytes:
             self._partial = True
             self._warn(f"{rel}: larger than the 5 MiB checkpoint limit")
+            self._write()
             return
         size = len(data) if data is not None else 0
         if size and self._bytes + size > self.max_turn_bytes:
             self._partial = True
             self._warn("turn checkpoint exceeded its 50 MiB limit")
+            self._write()
             return
-        if digest is not None and data is not None:
-            self._store_blob(digest, data)
+        if digest is not None and data is not None and not self._store_blob(digest, data):
+            self._partial = True
+            self._warn(f"{rel}: could not save the checkpoint backup")
         self._bytes += size
         self._files[rel] = _Entry(
             before_state=kind,
@@ -274,10 +299,12 @@ class CheckpointStore:
     # ------------------------------------------------------------------ preview
 
     def preview(self, turn_ids: list[str] | tuple[str, ...]) -> CheckpointPreview:
-        manifests = self._load_manifests(turn_ids)
+        load_warnings: list[str] = []
+        manifests = self._load_manifests(turn_ids, load_warnings)
         if not manifests:
-            return CheckpointPreview()
+            return CheckpointPreview(warnings=tuple(load_warnings))
         before, after, shell, commands, warnings, partial = self._merge(manifests)
+        warnings.extend(load_warnings)
         files: list[PreviewFile] = []
         restorable = not partial
         for rel in sorted(before):
@@ -286,11 +313,9 @@ class CheckpointStore:
             status = _status(old, new)
             if status is None:
                 continue
-            if old[0] == "present" and (
-                old[1] is None or not self._blob_path(old[1]).is_file()
-            ):
+            if old[0] == "present" and not self._blob_ok(old[1]):
                 restorable = False
-                warnings.append(f"{rel}: checkpoint backup is missing")
+                warnings.append(f"{rel}: checkpoint backup is missing or corrupt")
             conflict = not self._current_matches(rel, new)
             files.append(PreviewFile(rel, status, conflict))
         return CheckpointPreview(
@@ -305,31 +330,33 @@ class CheckpointStore:
     def restore(
         self, turn_ids: list[str] | tuple[str, ...], *, force: bool = False
     ) -> RestoreResult:
-        manifests = self._load_manifests(turn_ids)
+        load_warnings: list[str] = []
+        manifests = self._load_manifests(turn_ids, load_warnings)
         if not manifests:
-            return RestoreResult()
+            return RestoreResult(warnings=tuple(load_warnings), aborted=bool(load_warnings))
         before, after, _, _, warnings, partial = self._merge(manifests)
-        if partial:
+        warnings.extend(load_warnings)
+        if partial or load_warnings:
             return RestoreResult(
-                warnings=(*warnings, "checkpoint is partial"), aborted=True
+                warnings=(*warnings, "checkpoint is partial or incomplete"),
+                aborted=True,
             )
         files = [
             (rel, old, after[rel])
             for rel, old in sorted(before.items())
             if _status(old, after[rel]) is not None
         ]
-        missing = [
+        bad = [
             rel
             for rel, old, _ in files
-            if old[0] == "present"
-            and (old[1] is None or not self._blob_path(old[1]).is_file())
+            if old[0] == "present" and not self._blob_ok(old[1])
         ]
-        if missing:
+        if bad:
             return RestoreResult(
-                skipped=tuple(missing),
+                skipped=tuple(bad),
                 warnings=(
                     *warnings,
-                    "one or more checkpoint backups are missing; nothing restored",
+                    "one or more checkpoint backups are missing or corrupt; nothing restored",
                 ),
                 aborted=True,
             )
@@ -342,16 +369,32 @@ class CheckpointStore:
                 warnings=(*warnings, "refusing to overwrite files changed since the turn"),
                 aborted=True,
             )
+        targets: dict[str, Path] = {}
+        unsafe: list[str] = []
+        for rel, _old, _ in files:
+            target = self._safe_target(rel)
+            if target is None:
+                unsafe.append(rel)
+                continue
+            if target.is_symlink() or target.is_dir():
+                unsafe.append(rel)
+                continue
+            targets[rel] = target
+        if unsafe:
+            return RestoreResult(
+                skipped=tuple(unsafe),
+                warnings=(
+                    *warnings,
+                    "one or more paths are not safely restorable; nothing restored",
+                ),
+                aborted=True,
+            )
         restored: list[str] = []
         skipped: list[str] = []
         for rel, old, _ in files:
-            target = self.workspace / rel
+            target = targets[rel]
             try:
                 if old[0] == "missing":
-                    if target.is_symlink() or target.is_dir():
-                        skipped.append(rel)
-                        warnings.append(f"{rel}: non-regular path; skipped")
-                        continue
                     if target.exists():
                         target.unlink()
                     restored.append(rel)
@@ -366,11 +409,6 @@ class CheckpointStore:
                     skipped.append(rel)
                     warnings.append(f"{rel}: checkpoint backup is corrupt")
                     continue
-                if target.is_symlink() or target.is_dir():
-                    skipped.append(rel)
-                    warnings.append(f"{rel}: non-regular path; skipped")
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_bytes(target, data, mode=old[2] or 0o600)
                 restored.append(rel)
             except OSError as exc:
@@ -381,6 +419,7 @@ class CheckpointStore:
             skipped=tuple(skipped),
             conflicts=tuple(conflicts) if force else (),
             warnings=tuple(warnings),
+            aborted=bool(skipped),
         )
 
     # ----------------------------------------------------------------- internals
@@ -410,7 +449,7 @@ class CheckpointStore:
                     return None
             path = path.resolve(strict=False)
             rel = path.relative_to(self.workspace)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             key = str(raw_path)
             if key not in self._outside_warned:
                 self._outside_warned.add(key)
@@ -429,6 +468,8 @@ class CheckpointStore:
             return None
         if stat_module.S_ISLNK(info.st_mode) or not stat_module.S_ISREG(info.st_mode):
             return None
+        if info.st_nlink > 1 or info.st_size > self.max_file_bytes:
+            return None
         try:
             data = path.read_bytes()
         except OSError:
@@ -440,10 +481,42 @@ class CheckpointStore:
             data,
         )
 
+    def _safe_target(self, rel: str) -> Path | None:
+        target = self.workspace / rel
+        try:
+            parent = target.parent.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        try:
+            parent.relative_to(self.workspace)
+        except ValueError:
+            return None
+        if target.is_symlink():
+            return None
+        return target
+
+    def _blob_ok(self, digest: str | None) -> bool:
+        if digest is None or not _HASH.fullmatch(digest):
+            return False
+        path = self._blob_path(digest)
+        if not path.is_file():
+            return False
+        hasher = hashlib.sha256()
+        try:
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+        except OSError:
+            return False
+        return hasher.hexdigest() == digest
+
     def _current_matches(
         self, rel: str, expected: tuple[str, str | None, int | None]
     ) -> bool:
-        state = self._read_state(self.workspace / rel)
+        target = self._safe_target(rel)
+        if target is None:
+            return False
+        state = self._read_state(target)
         if state is None:
             return False
         kind, digest, _, _ = state
@@ -484,8 +557,13 @@ class CheckpointStore:
                 )
         return before, after, shell, commands, warnings, partial
 
-    def _load_manifests(self, turn_ids: list[str] | tuple[str, ...]) -> list[_Manifest]:
+    def _load_manifests(
+        self,
+        turn_ids: list[str] | tuple[str, ...],
+        warnings: list[str] | None = None,
+    ) -> list[_Manifest]:
         manifests: list[_Manifest] = []
+        output = warnings if warnings is not None else []
         for turn_id in turn_ids:
             if not _TURN_ID.fullmatch(turn_id) or ".." in turn_id:
                 continue
@@ -494,44 +572,46 @@ class CheckpointStore:
                 continue
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError):
                 logger.warning("could not read checkpoint %s", turn_id)
+                output.append(f"{turn_id}: checkpoint is unreadable")
                 continue
             if not isinstance(data, dict):
+                output.append(f"{turn_id}: checkpoint is invalid")
                 continue
             workspace = str(data.get("workspace", ""))
-            if workspace and Path(workspace).resolve() != self.workspace:
-                logger.warning("checkpoint workspace changed; skipping %s", turn_id)
-                continue
+            if workspace:
+                try:
+                    same_workspace = Path(workspace).resolve() == self.workspace
+                except (OSError, RuntimeError):
+                    same_workspace = False
+                if not same_workspace:
+                    logger.warning("checkpoint workspace changed; skipping %s", turn_id)
+                    output.append(
+                        f"{turn_id}: checkpoint was recorded for a different workspace"
+                    )
+                    continue
+            shell = data.get("shell")
+            shell = shell if isinstance(shell, dict) else {}
+            raw_commands = shell.get("commands")
+            raw_commands = raw_commands if isinstance(raw_commands, list) else []
+            raw_warnings = data.get("warnings")
+            raw_warnings = raw_warnings if isinstance(raw_warnings, list) else []
             manifest = _Manifest(
                 turn_id=turn_id,
                 created_at=str(data.get("created_at", "")),
                 workspace=workspace,
-                shell_ran=bool(data.get("shell", {}).get("ran", False))
-                if isinstance(data.get("shell"), dict)
-                else False,
-                commands=[
-                    str(item)
-                    for item in (
-                        data.get("shell", {}).get("commands", [])
-                        if isinstance(data.get("shell"), dict)
-                        else []
-                    )
-                    if isinstance(item, str)
-                ],
-                warnings=[
-                    str(item)
-                    for item in data.get("warnings", [])
-                    if isinstance(item, str)
-                ],
+                shell_ran=bool(shell.get("ran", False)),
+                commands=[str(item) for item in raw_commands if isinstance(item, str)],
+                warnings=[str(item) for item in raw_warnings if isinstance(item, str)],
                 partial=bool(data.get("partial", False)),
             )
-            raw_files = data.get("files", [])
-            if isinstance(raw_files, list):
-                for item in raw_files:
-                    parsed = _entry_from_dict(item)
-                    if parsed is not None:
-                        manifest.files[parsed[0]] = parsed[1]
+            raw_files = data.get("files")
+            raw_files = raw_files if isinstance(raw_files, list) else []
+            for item in raw_files:
+                parsed = _entry_from_dict(item)
+                if parsed is not None:
+                    manifest.files[parsed[0]] = parsed[1]
             manifests.append(manifest)
         return manifests
 
@@ -571,49 +651,113 @@ class CheckpointStore:
     def _blob_path(self, digest: str) -> Path:
         return self._blobs_dir / digest[:2] / digest
 
-    def _store_blob(self, digest: str, data: bytes) -> None:
+    def _store_blob(self, digest: str, data: bytes) -> bool:
         path = self._blob_path(digest)
         if path.is_file():
-            return
+            return True
         try:
             atomic_write_bytes(path, data)
         except OSError:
             logger.warning("could not write checkpoint blob", exc_info=True)
+            return False
+        return path.is_file()
 
-    def _prune(self) -> None:
+    def mark_restored(self, turn_ids: list[str] | tuple[str, ...]) -> None:
+        """After a successful restore, make retained manifests describe the restored state."""
+        for turn_id in turn_ids:
+            if not _TURN_ID.fullmatch(turn_id) or ".." in turn_id:
+                continue
+            path = self._manifest_path(turn_id)
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            files = data.get("files")
+            if not isinstance(files, list):
+                continue
+            for item in files:
+                if not isinstance(item, dict):
+                    continue
+                before = item.get("before")
+                if isinstance(before, dict):
+                    item["after"] = {
+                        "state": before.get("state"),
+                        "hash": before.get("hash"),
+                        "mode": before.get("mode"),
+                    }
+            try:
+                atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+            except OSError:
+                logger.warning("could not update checkpoint after restore", exc_info=True)
+
+    def discard(self, turn_ids: list[str] | tuple[str, ...]) -> None:
+        """Remove checkpoints for turns whose messages are no longer reachable."""
+        for turn_id in turn_ids:
+            if not _TURN_ID.fullmatch(turn_id) or ".." in turn_id:
+                continue
+            with contextlib.suppress(OSError):
+                self._manifest_path(turn_id).unlink()
+        try:
+            self._prune()
+        except Exception:  # noqa: BLE001 - best effort
+            logger.warning("checkpoint prune failed", exc_info=True)
+
+    def _prune(self, *, keep_turn_id: str | None = None) -> None:
         try:
             manifests = list(self._turns_dir.glob("*.json"))
         except OSError:
             return
         cutoff = time.time() - self.max_age_days * 86_400
-        kept: list[tuple[float, Path]] = []
+        kept: list[tuple[int, Path]] = []
         for path in manifests:
+            if keep_turn_id is not None and path.stem == keep_turn_id:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                kept.append((stat.st_mtime_ns, path))
+                continue
             try:
-                mtime = path.stat().st_mtime
+                stat = path.stat()
             except OSError:
                 continue
-            if mtime < cutoff:
+            if stat.st_mtime < cutoff:
                 with contextlib.suppress(OSError):
                     path.unlink()
                 continue
-            kept.append((mtime, path))
-        kept.sort(key=lambda item: item[0], reverse=True)
-        for _, path in kept[self.max_checkpoints :]:
-            with contextlib.suppress(OSError):
-                path.unlink()
-        kept = kept[: self.max_checkpoints]
-        referenced: set[str] = set()
+            kept.append((stat.st_mtime_ns, path))
+        kept.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+        keep_path = None
+        kept_paths: list[Path] = []
         for _, path in kept:
+            if keep_turn_id is not None and path.stem == keep_turn_id:
+                keep_path = path
+            kept_paths.append(path)
+        kept_paths = kept_paths[: self.max_checkpoints]
+        if keep_path is not None and keep_path not in kept_paths:
+            kept_paths.append(keep_path)
+        referenced: set[str] = set()
+        for path in kept_paths:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError):
                 continue
-            for item in data.get("files", []) if isinstance(data, dict) else []:
+            raw_files = data.get("files") if isinstance(data, dict) else []
+            if not isinstance(raw_files, list):
+                continue
+            for item in raw_files:
                 if not isinstance(item, dict):
                     continue
                 before = item.get("before")
                 if isinstance(before, dict) and isinstance(before.get("hash"), str):
                     referenced.add(before["hash"])
+        keep_names = {path.name for path in kept_paths}
+        for _, path in kept:
+            if path.name not in keep_names:
+                with contextlib.suppress(OSError):
+                    path.unlink()
         try:
             blobs = list(self._blobs_dir.glob("*/*"))
         except OSError:
@@ -628,7 +772,15 @@ def _entry_from_dict(item: Any) -> tuple[str, _Entry] | None:
     if not isinstance(item, dict):
         return None
     rel = item.get("path")
-    if not isinstance(rel, str) or not rel or rel.startswith("/") or ".." in Path(rel).parts:
+    if not isinstance(rel, str) or not rel:
+        return None
+    parsed_path = Path(rel)
+    if (
+        parsed_path.is_absolute()
+        or parsed_path.drive
+        or parsed_path.anchor
+        or ".." in parsed_path.parts
+    ):
         return None
     before = item.get("before")
     after = item.get("after")
@@ -641,14 +793,20 @@ def _entry_from_dict(item: Any) -> tuple[str, _Entry] | None:
         "missing",
     ):
         return None
+    before_hash = _optional_hash(before.get("hash"))
+    after_hash = _optional_hash(after.get("hash"))
+    if before_state == "present" and before_hash is None:
+        return None
+    if after_state == "present" and after_hash is None:
+        return None
     return (
         rel,
         _Entry(
             before_state=before_state,
-            before_hash=_optional_str(before.get("hash")),
+            before_hash=before_hash,
             before_mode=_optional_int(before.get("mode")),
             after_state=after_state,
-            after_hash=_optional_str(after.get("hash")),
+            after_hash=after_hash,
             after_mode=_optional_int(after.get("mode")),
         ),
     )
@@ -656,6 +814,10 @@ def _entry_from_dict(item: Any) -> tuple[str, _Entry] | None:
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _optional_hash(value: Any) -> str | None:
+    return value if isinstance(value, str) and _HASH.fullmatch(value) else None
 
 
 def _optional_int(value: Any) -> int | None:
@@ -670,6 +832,8 @@ def _status(
         return "created"
     if before[0] == "present" and after[0] == "missing":
         return "deleted"
-    if before[0] == "present" and after[0] == "present" and before[1] != after[1]:
+    if before[0] == "present" and after[0] == "present" and (
+        before[1] != after[1] or before[2] != after[2]
+    ):
         return "modified"
     return None

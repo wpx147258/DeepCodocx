@@ -97,11 +97,17 @@ class ToolExecutor:
         )
         tracked_path = raw_path if isinstance(raw_path, str) else None
         if checkpoint is not None and tracked_path is not None:
-            checkpoint.capture(tracked_path)
+            try:
+                checkpoint.capture(tracked_path)
+            except Exception:  # noqa: BLE001 - checkpointing is best effort
+                logger.warning("checkpoint capture failed", exc_info=True)
         if checkpoint is not None and tool.spec.category == "shell":
             command = prepared.call.input.get("command")
             if isinstance(command, str):
-                checkpoint.note_shell(command)
+                try:
+                    checkpoint.note_shell(command)
+                except Exception:  # noqa: BLE001 - checkpointing is best effort
+                    logger.warning("checkpoint shell note failed", exc_info=True)
         try:
             result = await tool.run(prepared.call.input, ctx)
         except asyncio.CancelledError:
@@ -111,7 +117,10 @@ class ToolExecutor:
             return ToolResult.error(f"Error: {type(exc).__name__}: {exc}")
         finally:
             if checkpoint is not None and tracked_path is not None:
-                checkpoint.record_after(tracked_path)
+                try:
+                    checkpoint.record_after(tracked_path)
+                except Exception:  # noqa: BLE001 - checkpointing is best effort
+                    logger.warning("checkpoint record failed", exc_info=True)
 
         if not isinstance(result, ToolResult):
             return ToolResult.error(
