@@ -166,8 +166,21 @@ class AgentRuntime:
 
     @property
     def context_tokens(self) -> int:
-        """Estimated size of the last request (messages + system + tools)."""
-        return self._last_request_tokens
+        """Estimated size of the current view (messages + system + tools).
+
+        A resumed or freshly opened session has not issued a request yet; fall
+        back to an estimate so the context meter does not read zero.
+        """
+        if self._last_request_tokens > 0:
+            return self._last_request_tokens
+        try:
+            _, estimated = self._build_request(
+                self._deps.transcript.for_request()
+            )
+        except Exception:  # noqa: BLE001 - a readout must never break the host
+            logger.debug("could not estimate context size", exc_info=True)
+            return 0
+        return estimated
 
     @property
     def context_window(self) -> int:
@@ -393,6 +406,8 @@ class AgentRuntime:
         self._deps.provider = provider
         self._deps.profile = profile
         self._deps.thinking = thinking
+        # Let the context meter recompute against the new window/system prompt.
+        self._last_request_tokens = 0
         if self._deps.provider_slot is not None:
             self._deps.provider_slot.replace(provider, profile, thinking)
         if old is not provider:

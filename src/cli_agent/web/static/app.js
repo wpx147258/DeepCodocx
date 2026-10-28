@@ -183,6 +183,30 @@
     $("scrim").hidden = !open;
   }
 
+  function isNarrow() {
+    return window.matchMedia("(max-width: 900px)").matches;
+  }
+
+  function setSidebarCollapsed(collapsed, { persist = true, focus = false } = {}) {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    $("sidebar-collapse").setAttribute("aria-expanded", String(!collapsed));
+    $("menu").setAttribute("aria-label", collapsed ? "Show sidebar" : "Open sidebar");
+    if (persist) {
+      try {
+        localStorage.setItem("cli-agent-sidebar-collapsed", collapsed ? "1" : "0");
+      } catch (_) { /* ignore */ }
+    }
+    if (collapsed && focus) $("menu").focus();
+  }
+
+  function loadSidebarCollapsed() {
+    try {
+      if (localStorage.getItem("cli-agent-sidebar-collapsed") === "1") {
+        setSidebarCollapsed(true, { persist: false });
+      }
+    } catch (_) { /* ignore */ }
+  }
+
   function nearBottom() {
     const box = $("transcript");
     return box.scrollHeight - box.scrollTop - box.clientHeight < 140;
@@ -1107,7 +1131,9 @@
     const bar = $("ctx-bar");
     bar.style.width = `${Math.max(ratio * 100, used > 0 ? 2 : 0)}%`;
     bar.className = ratio >= 0.9 ? "hot" : ratio >= 0.75 ? "warn" : "";
-    $("ctx-text").textContent = `${formatTokens(used || 0)} / ${formatTokens(window || 0)} tokens · ${Math.round(ratio * 100)}%`;
+    const percent =
+      used > 0 && ratio < 0.01 ? "<1%" : `${Math.round(ratio * 100)}%`;
+    $("ctx-text").textContent = `${formatTokens(used || 0)} / ${formatTokens(window || 0)} tokens · ${percent}`;
   }
 
   function updateEmptyState() {
@@ -1797,9 +1823,18 @@
       state.searchTimer = setTimeout(refreshSessions, 220);
     });
 
-    $("menu").addEventListener("click", () => setSidebar(true));
+    $("menu").addEventListener("click", () => {
+      if (isNarrow()) setSidebar(true);
+      else setSidebarCollapsed(false);
+    });
+    $("sidebar-collapse").addEventListener("click", () =>
+      setSidebarCollapsed(true, { focus: true })
+    );
     $("sidebar-close").addEventListener("click", () => setSidebar(false));
     $("scrim").addEventListener("click", () => setSidebar(false));
+    window.addEventListener("resize", () => {
+      if (!isNarrow()) setSidebar(false);
+    });
 
     $("messages").addEventListener("click", async (event) => {
       const copy = event.target.closest(".copy");
@@ -1880,8 +1915,22 @@
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setSidebar(true);
+        if (isNarrow()) setSidebar(true);
+        else if (document.body.classList.contains("sidebar-collapsed")) {
+          setSidebarCollapsed(false);
+        }
         $("chat-search").focus();
+        return;
+      }
+      if (command && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        if (isNarrow()) setSidebar(!document.body.classList.contains("sidebar-open"));
+        else {
+          setSidebarCollapsed(
+            !document.body.classList.contains("sidebar-collapsed"),
+            { focus: true }
+          );
+        }
         return;
       }
       if (event.altKey && !command && event.key.toLowerCase() === "n") {
@@ -1913,6 +1962,7 @@
   async function init() {
     applyTheme(initialTheme());
     loadSidebarWidth();
+    loadSidebarCollapsed();
     bindEvents();
     loadDraft();
     updateComposer();

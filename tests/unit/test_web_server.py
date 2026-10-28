@@ -106,6 +106,7 @@ async def test_bootstrap_and_streamed_turn(client_factory) -> None:
         assert data["session_id"] == "test-session"
         assert data["messages"] == []
         assert data["model"] == "fake-model"
+        assert data["context_tokens"] > 0
         assert data["models"]
 
         response = await client.post("/api/chat", json={"text": "hi"})

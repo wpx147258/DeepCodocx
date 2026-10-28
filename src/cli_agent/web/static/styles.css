@@ -152,6 +152,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 
 .sidebar .sidebar-close { display: none; width: 30px; height: 30px; }
+.sidebar-collapse { width: 28px; height: 28px; margin-left: 2px; }
+.sidebar-collapse svg { width: 15px; height: 15px; }
 .brand-dot {
   width: 6px; height: 6px;
   margin-left: auto;
@@ -1100,6 +1102,20 @@ html[data-theme="light"] .icon-moon { display: none; }
 
 /* --------------------------------------------------------------- responsive */
 
+@media (min-width: 901px) {
+  body.sidebar-collapsed .app { grid-template-columns: 0 minmax(0, 1fr); }
+  body.sidebar-collapsed .sidebar {
+    min-width: 0;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  body.sidebar-collapsed .resizer { display: none; }
+  body.sidebar-collapsed .menu { display: grid; }
+}
+
 @media (max-width: 900px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar {
@@ -1120,6 +1136,7 @@ html[data-theme="light"] .icon-moon { display: none; }
   .menu { display: grid; }
   .resizer { display: none; }
   .sidebar .sidebar-close { display: grid; margin-left: 6px; }
+  .sidebar .sidebar-collapse { display: none; }
   .brand-dot { display: none; }
   .topbar { padding: 10px 13px; }
   .model-chip { display: none; }

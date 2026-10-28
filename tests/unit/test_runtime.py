@@ -434,15 +434,18 @@ async def test_calibration_counts_cached_prompt_tokens(tmp_path: Path) -> None:
     await runtime.close()
 
 
-async def test_context_tokens_tracks_the_last_request(tmp_path: Path) -> None:
+async def test_context_tokens_track_the_current_view(tmp_path: Path) -> None:
     provider = FakeProvider([[text_response("ok")]])
     runtime, _ = make_runtime(provider, tmp_path=tmp_path)
-    assert runtime.context_tokens == 0
+    initial = runtime.context_tokens
+    assert initial > 0  # system prompt + tools, before the first request
     await _consume(runtime, "hello")
-    assert runtime.context_tokens > 0
+    after_turn = runtime.context_tokens
+    assert after_turn > initial
     assert runtime.context_window == 200_000
     await runtime.clear()
-    assert runtime.context_tokens == 0
+    assert runtime.context_tokens > 0
+    assert runtime.context_tokens < after_turn
     await runtime.close()
 
 
@@ -703,3 +706,14 @@ async def test_image_is_part_of_the_user_message(tmp_path: Path) -> None:
     assert any(isinstance(block, ImageBlock) for block in user.content)
     assert any(isinstance(event, AgentTurnFinished) for event in events)
     await runtime.close()
+
+
+async def test_context_tokens_estimates_before_the_first_request(
+    tmp_path: Path,
+) -> None:
+    runtime, _ = make_runtime(FakeProvider([]), tmp_path=tmp_path)
+    try:
+        assert runtime.context_tokens > 0
+        assert runtime.context_tokens < runtime.context_window
+    finally:
+        await runtime.close()
