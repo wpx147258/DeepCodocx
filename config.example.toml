@@ -37,6 +37,18 @@ libraries = []
 # default_library = "/path/to/deep-docs-unified/data"
 # With no saved/configured library, a nearby deep-docs-unified/data is discovered.
 
+# System-side document ingestion. This is not exposed as an agent tool.
+[deepdocx.ingest]
+# Poppler must provide pdftotext and pdftoppm for Basic bundles.
+basic_dpi = 72
+max_upload_mb = 200
+max_files = 50
+# Absolute path to a Marker-enabled environment; leave as marker_single only
+# when that command is already on PATH.
+# marker_command = "/home/user/miniconda3/bin/marker_single"
+marker_command = "marker_single"
+marker_timeout = 1800
+
 # Optional generic MCP stdio server. Commands are local configuration; models
 # cannot choose executable paths. Unknown tools require normal approval.
 # [mcp_servers.notes]

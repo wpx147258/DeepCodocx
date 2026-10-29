@@ -1314,3 +1314,14 @@ html[data-theme="light"] .icon-moon { display: none; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* Document ingestion */
+.ingest-open { margin: 6px 0 10px; width: 100%; justify-content: center; }
+.ingest-dialog { width: min(560px, calc(100vw - 32px)); }
+.ingest-progress { margin: 14px 0 4px; }
+.ingest-list { margin-top: 8px; max-height: 180px; overflow: auto; font-size: 12px; color: var(--muted); }
+.ingest-list div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.ingest-list .ok { color: var(--green, #2f9e66); }
+.ingest-list .failed { color: var(--red, #c0392b); }
+.dialog-check span { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+.ingest-dialog input[type=file] { width: 100%; }

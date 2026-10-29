@@ -47,6 +47,7 @@
         <div id="document-navigation" hidden>
           <div class="side-label">文档库</div>
           <button class="ghost library-name" id="library-name" type="button" title="选择文档库与范围"></button>
+          <button class="ghost small ingest-open" id="ingest-open" type="button">＋ 添加文档</button>
           <input id="document-search" class="document-search" type="search" placeholder="查找论文…" aria-label="查找论文">
           <div class="document-list" id="document-list"></div>
         </div>
@@ -182,6 +183,33 @@
       <details><summary>限定文档范围（默认整个库）</summary><div id="deepdocx-scope" class="deepdocx-scope"></div></details>
       <p id="deepdocx-error" class="dialog-error" role="status" hidden></p>
       <div class="dialog-actions"><button class="ghost" id="deepdocx-cancel" type="button">取消</button><button class="primary" id="deepdocx-enter" type="submit">进入文档工作区 →</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ingest-dialog" class="deepdocx-dialog ingest-dialog" aria-labelledby="ingest-title">
+    <form id="ingest-form">
+      <span class="side-label">DOCUMENT INGESTION</span>
+      <h2 id="ingest-title">添加文档</h2>
+      <p>上传 PDF，生成可检索的 basic 或 Marker bundle。生成在后台进行，不占用 Agent 对话。</p>
+      <label class="dialog-field"><span>PDF 文件</span><input id="ingest-files" type="file" accept=".pdf,application/pdf" multiple required></label>
+      <p id="ingest-env" class="side-hint" aria-live="polite"></p>
+      <fieldset class="deepdocx-start"><legend>生成方式</legend>
+        <label><input type="radio" name="ingest-mode" value="basic" checked> Basic · 快，文本定位与页面预览</label>
+        <label><input type="radio" name="ingest-mode" value="marker"> Marker · 图表与段落结构，较慢</label>
+        <label><input type="radio" name="ingest-mode" value="both"> Both · 先 Basic，再后台 Marker</label>
+      </fieldset>
+      <label class="dialog-field dialog-check"><span><input id="ingest-force" type="checkbox"> 覆盖已存在的同名 bundle</span></label>
+      <div id="ingest-progress" class="ingest-progress" hidden>
+        <div class="side-hint" id="ingest-status"></div>
+        <div class="meter" aria-hidden="true"><span id="ingest-bar"></span></div>
+        <div class="ingest-list" id="ingest-list"></div>
+      </div>
+      <p id="ingest-error" class="dialog-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="ghost" id="ingest-cancel" type="button">取消</button>
+        <button class="ghost" id="ingest-close" type="button" hidden>关闭</button>
+        <button class="primary" id="ingest-start" type="submit">开始生成 →</button>
+      </div>
     </form>
   </dialog>
 

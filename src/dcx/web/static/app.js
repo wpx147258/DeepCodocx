@@ -1564,6 +1564,161 @@
     }
   }
 
+  // --------------------------------------------------------------- ingestion
+  const ingestState = { job: null, timer: null };
+
+  function ingestError(message) {
+    const node = $("ingest-error");
+    node.textContent = message || "";
+    node.hidden = !message;
+  }
+
+  function ingestStatusText(job) {
+    const current = job.current;
+    if (current) return `${current.mode} · ${current.index + 1}/${job.files.length} · ${current.name}`;
+    return job.status;
+  }
+
+  function renderIngest(job) {
+    ingestState.job = job;
+    $("ingest-progress").hidden = false;
+    $("ingest-status").textContent = ingestStatusText(job);
+    const total = Math.max(1, job.files.length);
+    const done = job.files.filter((item) => ["ok", "skipped", "failed"].includes(item.status)).length;
+    $("ingest-bar").style.width = `${Math.round((done / total) * 100)}%`;
+    const list = $("ingest-list");
+    list.replaceChildren();
+    for (const item of job.files) {
+      const row = document.createElement("div");
+      const name = document.createElement("span");
+      name.textContent = item.name;
+      const status = document.createElement("span");
+      status.textContent = item.error || item.status;
+      status.className = item.status === "failed" ? "failed" : item.status === "ok" ? "ok" : "";
+      row.append(name, status);
+      list.appendChild(row);
+    }
+    if (job.error) ingestError(job.error);
+    const terminal = ["succeeded", "partial", "failed", "cancelled"].includes(job.status);
+    $("ingest-start").disabled = terminal;
+    $("ingest-start").hidden = terminal;
+    $("ingest-cancel").hidden = terminal;
+    $("ingest-close").hidden = !terminal;
+    if (job.warnings && job.warnings.length) {
+      ingestError(job.warnings.slice(-2).join(" · "));
+    }
+  }
+
+  async function pollIngest() {
+    const job = ingestState.job;
+    if (!job) return;
+    try {
+      const data = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}`);
+      renderIngest(data);
+      if (!["succeeded", "partial", "failed", "cancelled"].includes(data.status)) {
+        ingestState.timer = setTimeout(pollIngest, 900);
+      } else if (data.status === "succeeded" || data.status === "partial") {
+        await refreshState();
+        await refreshDocumentNavigation();
+      }
+    } catch (error) {
+      ingestError(error.message || String(error));
+    }
+  }
+
+  function openIngestDialog() {
+    if (state.data?.mode !== "deepdocx" || !state.data?.session_context?.library_id) {
+      toast("请先进入 DeepDocx 文档工作区。");
+      return;
+    }
+    ingestState.job = null;
+    if (ingestState.timer) clearTimeout(ingestState.timer);
+    ingestState.timer = null;
+    ingestError("");
+    $("ingest-progress").hidden = true;
+    $("ingest-start").disabled = false;
+    $("ingest-start").hidden = false;
+    $("ingest-cancel").hidden = false;
+    $("ingest-close").hidden = true;
+    $("ingest-files").value = "";
+    $("ingest-force").checked = false;
+    $("ingest-env").textContent = "正在检查生成环境…";
+    $("ingest-dialog").showModal();
+    api("/api/ingest/environment").then((env) => {
+      const parts = [
+        env.basic_ready ? "Basic 可用" : "Basic 不可用：缺少 pdftotext / pdftoppm",
+        env.marker_ready ? "Marker 可用" : "Marker 不可用：未配置 marker_command",
+      ];
+      $("ingest-env").textContent = parts.join(" · ");
+      for (const input of $("ingest-form").querySelectorAll('input[name="ingest-mode"]')) {
+        if (input.value === "marker" || input.value === "both") input.disabled = !env.marker_ready;
+        if (input.value === "basic") input.disabled = !env.basic_ready;
+      }
+      if (!env.basic_ready && env.marker_ready) {
+        $("ingest-form").querySelector('input[name="ingest-mode"][value="marker"]').checked = true;
+      }
+    }).catch((error) => {
+      $("ingest-env").textContent = "无法检查生成环境";
+      ingestError(error.message || String(error));
+    });
+  }
+
+  async function uploadIngestFile(jobId, file) {
+    const url = `/api/ingest/jobs/${encodeURIComponent(jobId)}/files?name=${encodeURIComponent(file.name)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/pdf" },
+      body: file,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || `Upload failed (${res.status})`);
+    return data;
+  }
+
+  async function startIngest(event) {
+    event.preventDefault();
+    const libraryId = state.data?.session_context?.library_id;
+    if (!libraryId) { ingestError("请先进入 DeepDocx 文档工作区。"); return; }
+    const files = [...$("ingest-files").files];
+    if (!files.length) { ingestError("请选择至少一个 PDF。"); return; }
+    const mode = $("ingest-form").querySelector('input[name="ingest-mode"]:checked')?.value;
+    if (!mode) { ingestError("请选择生成方式。"); return; }
+    ingestError("");
+    $("ingest-start").disabled = true;
+    $("ingest-progress").hidden = false;
+    try {
+      let job = await api("/api/ingest/jobs", {
+        library_id: libraryId,
+        mode,
+        force: $("ingest-force").checked,
+      });
+      renderIngest(job);
+      for (const file of files) {
+        job = await uploadIngestFile(job.id, file);
+        renderIngest(job);
+      }
+      job = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}/start`, {});
+      renderIngest(job);
+      ingestState.timer = setTimeout(pollIngest, 500);
+    } catch (error) {
+      ingestError(error.message || String(error));
+      $("ingest-start").disabled = false;
+    }
+  }
+
+  async function cancelIngest() {
+    const job = ingestState.job;
+    if (job && !["succeeded", "partial", "failed", "cancelled"].includes(job.status)) {
+      try {
+        renderIngest(await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}/cancel`, {}));
+      } catch (error) {
+        ingestError(error.message || String(error));
+      }
+      return;
+    }
+    $("ingest-dialog").close();
+  }
+
   function populateModels(models, data) {
     const select = $("model-select");
     const current = modelValue(data.provider, data.model);
@@ -2303,6 +2458,14 @@
     $("deepdocx-register").addEventListener("click", registerLibrary);
     $("deepdocx-library").addEventListener("change", loadDocumentScope);
     $("deepdocx-form").addEventListener("submit", enterDocumentMode);
+    $("ingest-open").addEventListener("click", openIngestDialog);
+    $("ingest-form").addEventListener("submit", startIngest);
+    $("ingest-cancel").addEventListener("click", cancelIngest);
+    $("ingest-close").addEventListener("click", () => $("ingest-dialog").close());
+    $("ingest-files").addEventListener("change", () => {
+      const names = [...$("ingest-files").files].map((file) => file.name).join(" · ");
+      $("ingest-env").textContent = names ? `${$("ingest-files").files.length} 个 PDF：${names}` : "";
+    });
     $("document-search").addEventListener("input", refreshDocumentNavigation);
     $("evidence-close").addEventListener("click", closeEvidence);
     document.addEventListener("click", (event) => {

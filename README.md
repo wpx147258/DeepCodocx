@@ -56,7 +56,8 @@ GLM 的 Anthropic-compatible 接口有内置配置，更多选项见[配置指�
 ## 带上你的文档库
 
 点击 **DeepDocx**，选择全新会话或 fork 当前讨论，再连接已有的 basic / Marker bundle
-目录。可以限定论文范围，选择会跨重启保存。
+目录。可以限定论文范围，选择会跨重启保存。进入工作区后用 **添加文档** 上传 PDF，选择
+Basic / Marker / Both 生成方式；生成在后台进行，不在 Agent 对话中执行。
 
 也可以直接从文档模式启动：
 
@@ -66,7 +67,8 @@ uv run dcx web --provider deepseek --library /path/to/paper-bundles
 
 先定位论文，再阅读相关段落、查看原图、结合证据解释——这些操作都可以在同一段讨论中
 自然衔接。已有可用的文档库会自动选中，详细输入格式与操作方式见
-[DeepDocx 文档指南](docs/deepdocx.md)。
+[DeepDocx 文档指南](docs/deepdocx.md)；上传与生成见
+[文档入库](docs/deepdocx-ingest.md)。
 
 界面示例使用预处理论文与脚本 provider 生成；实际回答效果取决于所选模型及文档质量。
 

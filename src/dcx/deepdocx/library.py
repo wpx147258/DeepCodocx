@@ -195,6 +195,11 @@ class DocumentLibrary:
         self._entries: dict[tuple[str, str, str], Rendition] | None = None
         self._units_cache: dict[Path, list[dict[str, Any]]] = {}
 
+    def reload(self) -> None:
+        """Drop the in-memory manifest/unit caches after a build completes."""
+        self._entries = None
+        self._units_cache.clear()
+
     def safe_path(self, entry: Rendition, relative: str) -> Path:
         path = (entry.path / relative).resolve(strict=True)
         if (
