@@ -12,7 +12,7 @@ uv run pytest -q --cov=dcx --cov-report=term-missing --cov-fail-under=75
 node --check src/dcx/web/static/app.js
 ```
 
-源码包为 `src/dcx`，安装后的命令是 `cli-agent`。CLI、Web 和 MCP 子进程均使用此包。
+源码包为 `src/dcx`，安装后的命令是 `dcx`。CLI、Web 和 MCP 子进程均使用此包。
 模块边界见[架构说明](architecture.md)，开发约定见 [AGENTS.md](../AGENTS.md)。
 
 每个新增行为应有测试。Loop 测试使用 `tests/support/fake_provider.py`；文档测试通过
@@ -25,7 +25,7 @@ uv run --with playwright python -m playwright install chromium
 uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-browser
 ```
 
-该验收使用脚本 provider，运行真实 Web 服务、stdio MCP 和浏览器，检查文档库默认值、
+该验收使用脚本 provider，运行真实 Web 服务、stdio MCP 和浏览器，检查旧版浏览器设置迁移、文档库默认值、
 选择记忆、fork/new、搜索、图片、引用、会话隔离及窄屏布局。
 输出目录中的截图用于界面核对。附加 `--library /path/to/paper-bundles` 可检查包含
 MEMORYVLA Marker 产物的真实本地语料，目录只读访问。
@@ -33,13 +33,13 @@ MEMORYVLA Marker 产物的真实本地语料，目录只读访问。
 ## 真实 provider 测试
 
 ```bash
-export CLI_AGENT_E2E_PROVIDER=deepseek
+export DCX_E2E_PROVIDER=deepseek
 export DEEPSEEK_API_KEY="your-api-key"
 uv run pytest tests/e2e -q
 ```
 
 这组测试会请求真实服务；未设置 provider 时默认跳过。模型可通过
-`CLI_AGENT_E2E_MODEL` 指定。CI 的手动 `workflow_dispatch` 任务使用对应仓库 secret。
+`DCX_E2E_MODEL` 指定。CI 的手动 `workflow_dispatch` 任务使用对应仓库 secret。
 
 ## 贡献方向
 

@@ -1,6 +1,6 @@
 """Live provider smoke tests.
 
-Skipped unless CLI_AGENT_E2E_PROVIDER is set. They never fall back to another
+Skipped unless DCX_E2E_PROVIDER is set. They never fall back to another
 provider: configure that provider's key env before running.
 """
 
@@ -15,17 +15,17 @@ from dcx.assembly import BuildOptions, build_runtime
 from dcx.events import AgentTextDelta, AgentToolFinished
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("CLI_AGENT_E2E_PROVIDER"),
-    reason="set CLI_AGENT_E2E_PROVIDER to run live provider tests",
+    not os.environ.get("DCX_E2E_PROVIDER"),
+    reason="set DCX_E2E_PROVIDER to run live provider tests",
 )
 
 
 def _bundle(tmp_path: Path):
-    provider = os.environ["CLI_AGENT_E2E_PROVIDER"]
+    provider = os.environ["DCX_E2E_PROVIDER"]
     return build_runtime(
         BuildOptions(
             provider=provider,
-            model=os.environ.get("CLI_AGENT_E2E_MODEL"),
+            model=os.environ.get("DCX_E2E_MODEL"),
             persist=False,
             memory_enabled=False,
             permission_mode="bypass",

@@ -74,7 +74,7 @@ class SessionStore:
                 raise
             return store
 
-        root = Path(tempfile.mkdtemp(prefix="cli-agent-session-"))
+        root = Path(tempfile.mkdtemp(prefix="dcx-session-"))
         paths = SessionPaths(
             root=root,
             jsonl=root / "session.jsonl",

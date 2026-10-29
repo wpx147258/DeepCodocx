@@ -57,7 +57,7 @@ class StdioClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "cli-agent", "version": "0.1.0"},
+                "clientInfo": {"name": "dcx", "version": "0.1.0"},
             },
         )
         await self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})

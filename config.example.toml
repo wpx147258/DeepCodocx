@@ -1,4 +1,4 @@
-# Copy this file to ~/.config/cli-agent/config.toml, or pass it with --config.
+# Copy this file to ~/.config/dcx/config.toml, or pass it with --config.
 
 default_provider = "deepseek"
 default_model = "deepseek-flash[1M]"

@@ -543,7 +543,7 @@ async def test_default_config_discovers_nearby_library_without_manual_path(
     tmp_path: Path, monkeypatch
 ):
     options = setup_build(tmp_path, monkeypatch)
-    workspace = tmp_path / "cli_agent"
+    workspace = tmp_path / "DeepCodocx"
     workspace.mkdir()
     corpus = document_library(tmp_path / "deep-docs-unified/data/paper-bundles")
     options = replace(options, cwd=workspace)

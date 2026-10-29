@@ -54,7 +54,7 @@ def test_prompt_has_modular_sections_and_actual_identity(tmp_path: Path) -> None
     names = [section.name for section in sections]
     assert names[:5] == ["identity", "workspace", "tools", "file-operations", "shell"]
     text = "\n\n".join(section.text for section in sections)
-    assert "cli-agent" in text
+    assert "dcx" in text
     assert str(tmp_path) in text
     assert "deepseek provider" in text
     assert "deepseek-flash[1M] model" in text

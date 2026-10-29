@@ -8,7 +8,7 @@ Use your existing provider configuration in DeepCodocx:
 
 ```bash
 uv sync --extra dev
-uv run cli-agent web
+uv run dcx web
 ```
 
 Click **DeepDocx**, connect a document directory, and choose a fresh conversation
@@ -20,7 +20,7 @@ scope; leaving the selection empty uses the whole library.
 You can also start with an existing library directly:
 
 ```bash
-uv run cli-agent web --library /path/to/paper-bundles
+uv run dcx web --library /path/to/paper-bundles
 ```
 
 This creates a DeepDocx session immediately. To choose whether to inherit a
@@ -31,10 +31,10 @@ existing text and images.
 CLI / headless examples:
 
 ```bash
-cli-agent run --library /path/to/paper-bundles "Explain MEMORYVLA's memory mechanism using the original text and figures"
-cli-agent --mode deepdocx -c
-cli-agent run --resume SESSION_ID "Continue with the next section"
-cli-agent run --resume NORMAL_SESSION --fork --library /path/to/paper-bundles "Continue from our earlier discussion"
+dcx run --library /path/to/paper-bundles "Explain MEMORYVLA's memory mechanism using the original text and figures"
+dcx --mode deepdocx -c
+dcx run --resume SESSION_ID "Continue with the next section"
+dcx run --resume NORMAL_SESSION --fork --library /path/to/paper-bundles "Continue from our earlier discussion"
 ```
 
 Within a workspace, plain `-c` resumes the latest general session;
@@ -43,7 +43,7 @@ restores its saved mode. Existing Bash approval rules continue to apply.
 
 ## Library configuration
 
-You can configure directories in `~/.config/cli-agent/config.toml`:
+You can configure directories in `~/.config/dcx/config.toml`:
 
 ```toml
 [deepdocx]
@@ -53,7 +53,7 @@ default_library = "/path/to/deep-docs-unified/data"
 ```
 
 Directories connected through the UI are stored in
-`$XDG_DATA_HOME/cli-agent/libraries.json`. Successfully entering DeepDocx also
+`$XDG_DATA_HOME/dcx/libraries.json`. Successfully entering DeepDocx also
 saves the selected library. It is selected again after closing the page,
 restarting the server, or creating another session. Registering another
 directory preserves the previous selection.
@@ -62,8 +62,8 @@ Selection priority is: the current document session's binding, the last
 successful selection, `default_library`, then an available configured or saved
 library. When none is saved or configured, the app checks for
 `deep-docs-unified/data` near the current workspace. A valid bundle library is
-added to the selector automatically. In that layout, `cli-agent web` can offer
-the library without manual registration, and `cli-agent web --mode deepdocx`
+added to the selector automatically. In that layout, `dcx web` can offer
+the library without manual registration, and `dcx web --mode deepdocx`
 can use it directly. If no valid library exists, the dialog explains how to
 connect one and disables entry until one is available.
 

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 
-class CliAgentError(Exception):
+class DcxError(Exception):
     """Base class for errors that should be shown to the user."""
 
 
-class ConfigError(CliAgentError):
+class ConfigError(DcxError):
     """Invalid or missing configuration."""
 
 
-class SessionError(CliAgentError):
+class SessionError(DcxError):
     """A session could not be created, locked, or resumed."""
 
 
-class ToolInputError(CliAgentError):
+class ToolInputError(DcxError):
     """A tool call did not match its declared JSON Schema."""
 
 

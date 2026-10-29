@@ -41,14 +41,17 @@ cd DeepCodocx
 uv sync
 
 export DEEPSEEK_API_KEY="your-api-key"
-uv run cli-agent web --provider deepseek
+uv run dcx web --provider deepseek
 ```
 
 浏览器打开终端显示的地址，默认是 `http://127.0.0.1:8765/`。WSL 或无图形桌面环境可加
 `--no-open`；端口被占用时加 `--port 8766`。
 
-当前可执行命令为 `cli-agent`，Python 包名为 `dcx`。Anthropic、DeepSeek、Kimi、MiniMax、
+命令与 Python 包名统一为 `dcx`。Anthropic、DeepSeek、Kimi、MiniMax、
 GLM 的 Anthropic-compatible 接口有内置配置，更多选项见[配置指南](docs/configuration.md)。
+
+从旧版升级后运行 `uv sync`，再使用 `uv run dcx ...`。已有配置、历史会话和文档库选择
+会通过旧目录兼容继续使用，详见[升级说明](docs/troubleshooting.md)。
 
 ## 带上你的文档库
 
@@ -58,7 +61,7 @@ GLM 的 Anthropic-compatible 接口有内置配置，更多选项见[配置指�
 也可以直接从文档模式启动：
 
 ```bash
-uv run cli-agent web --provider deepseek --library /path/to/paper-bundles
+uv run dcx web --provider deepseek --library /path/to/paper-bundles
 ```
 
 先定位论文，再阅读相关段落、查看原图、结合证据解释——这些操作都可以在同一段讨论中
@@ -71,18 +74,18 @@ uv run cli-agent web --provider deepseek --library /path/to/paper-bundles
 
 ```bash
 # 交互式 coding agent
-uv run cli-agent --provider deepseek
+uv run dcx --provider deepseek
 
 # 继续最近的普通会话
-uv run cli-agent -c
+uv run dcx -c
 
 # 在文档库中定位并解释一个概念
-uv run cli-agent run --provider deepseek --library /path/to/paper-bundles \
+uv run dcx run --provider deepseek --library /path/to/paper-bundles \
   "结合原文和图示解释论文中的记忆机制"
 
 # 面向自动化的流式事件输出
 printf '介绍这个仓库的入口与主要模块' | \
-  uv run cli-agent run --provider deepseek --output-format jsonl -
+  uv run dcx run --provider deepseek --output-format jsonl -
 ```
 
 ## 深入使用

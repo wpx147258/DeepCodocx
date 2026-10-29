@@ -48,17 +48,21 @@ cd DeepCodocx
 uv sync
 
 export DEEPSEEK_API_KEY="your-api-key"
-uv run cli-agent web --provider deepseek
+uv run dcx web --provider deepseek
 ```
 
 Open the address printed in your terminal, normally `http://127.0.0.1:8765/`.
 On WSL or a machine without a graphical browser, add `--no-open`. If the port is
 occupied, add `--port 8766`.
 
-The executable is currently named `cli-agent`; the Python package is `dcx`.
+Both the command and Python package are named `dcx`.
 Built-in profiles cover Anthropic-compatible endpoints from Anthropic, DeepSeek,
 Kimi, MiniMax, and GLM. See the [configuration guide](docs/configuration.en.md)
 for more options.
+
+After upgrading, run `uv sync` and use `uv run dcx ...`. Existing configuration,
+session history, and library selections remain available through legacy directory
+compatibility. See the [upgrade notes](docs/troubleshooting.en.md).
 
 ## Bring your document library
 
@@ -69,7 +73,7 @@ selected papers, and the library selection is remembered across restarts.
 You can also start directly in document mode:
 
 ```bash
-uv run cli-agent web --provider deepseek --library /path/to/paper-bundles
+uv run dcx web --provider deepseek --library /path/to/paper-bundles
 ```
 
 Locate a paper, read the relevant passages, inspect the original figures, and
@@ -84,18 +88,18 @@ answer quality depends on the selected model and the source documents.
 
 ```bash
 # Interactive coding agent
-uv run cli-agent --provider deepseek
+uv run dcx --provider deepseek
 
 # Resume the latest general session
-uv run cli-agent -c
+uv run dcx -c
 
 # Locate and explain a concept in a document library
-uv run cli-agent run --provider deepseek --library /path/to/paper-bundles \
+uv run dcx run --provider deepseek --library /path/to/paper-bundles \
   "Explain the paper's memory mechanism using the original text and figures"
 
 # Stream events for automation
 printf 'Describe this repository: entry points and main modules' | \
-  uv run cli-agent run --provider deepseek --output-format jsonl -
+  uv run dcx run --provider deepseek --output-format jsonl -
 ```
 
 ## Documentation

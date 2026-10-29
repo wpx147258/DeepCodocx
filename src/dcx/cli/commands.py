@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..context.tokens import prompt_tokens
-from ..errors import CliAgentError
+from ..errors import DcxError
 from ..events import AgentNotice
 from ..messages import Usage
 from ..runtime import AgentRuntime
@@ -29,7 +29,7 @@ _HELP = """Commands:
   /cost              show cumulative token usage
   /exit              leave the REPL
 
-Key flags: cli-agent run for one-shot, -c/--resume, --provider, --model, --permission-mode."""
+Key flags: dcx run for one-shot, -c/--resume, --provider, --model, --permission-mode."""
 
 
 class CommandDispatcher:
@@ -132,7 +132,7 @@ class CommandDispatcher:
             else:
                 renderer.error("usage: /auto [on|off]")
                 return
-        except CliAgentError as exc:
+        except DcxError as exc:
             renderer.error(str(exc))
             return
         if mode == "bypass":

@@ -85,7 +85,7 @@ async def test_deepseek_defaults_to_thinking(tmp_path: Path) -> None:
 
 
 async def test_provider_limits_are_not_shadowed_by_model_presets(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         """

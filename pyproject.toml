@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cli-agent"
+name = "dcx"
 version = "0.1.0"
 description = "A coding and document agent with local evidence, visual reading, and discoverable MCP tools."
 readme = "README.md"
@@ -30,7 +30,7 @@ dev = [
 ]
 
 [project.scripts]
-cli-agent = "dcx.entry:main"
+dcx = "dcx.entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dcx"]

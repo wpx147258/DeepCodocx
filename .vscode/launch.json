@@ -3,8 +3,8 @@
     "configurations": [
         {
             // Interactive REPL: entry point is dcx/entry.py:main, reached
-            // through the click command installed as the `cli-agent` script.
-            "name": "cli-agent REPL",
+            // through the click command installed as the `dcx` script.
+            "name": "dcx REPL",
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
@@ -20,7 +20,7 @@
         },
         {
             // Same entry point in one-shot mode; edit the prompt as needed.
-            "name": "cli-agent print mode",
+            "name": "dcx print mode",
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",

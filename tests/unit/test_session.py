@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,38 @@ def test_round_trip_with_usage_and_checkpoint(tmp_path: Path) -> None:
         assert loaded.checkpoint is not None
         assert loaded.checkpoint["summary"] == "s"
         assert not loaded.degraded
+    finally:
+        resumed.close()
+
+
+def test_renamed_store_preserves_history_spills_and_writer_lock(tmp_path: Path) -> None:
+    legacy = tmp_path / "data" / "cli-agent"
+    legacy.mkdir(parents=True)
+    paths = replace(_paths(tmp_path), data_dir=legacy)
+    store = SessionStore.new(paths, provider="mock", model="mock-1", cwd=tmp_path)
+    store.append_message(user_message("original history"))
+    spill = store.paths.spills / "result.txt"
+    spill.parent.mkdir(parents=True, exist_ok=True)
+    spill.write_text("original tool output")
+    original = store.jsonl_path.read_bytes()
+    renamed = _paths(tmp_path)
+    try:
+        assert list_session_ids(renamed) == [store.session_id]
+        assert renamed.session_dir(store.session_id).samefile(store.paths.root)
+        with pytest.raises(SessionError):
+            SessionStore.resume(renamed, store.session_id)
+    finally:
+        store.close()
+
+    resumed, loaded = SessionStore.resume(renamed, store.session_id)
+    try:
+        assert loaded.messages[0].text() == "original history"
+        assert not loaded.degraded
+        assert resumed.jsonl_path.read_bytes() == original
+        assert (resumed.paths.spills / "result.txt").samefile(spill)
+        assert spill.read_text() == "original tool output"
+        resumed.append_message(user_message("continued after rename"))
+        assert store.jsonl_path.read_bytes().startswith(original)
     finally:
         resumed.close()
 

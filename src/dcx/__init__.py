@@ -1,4 +1,4 @@
-"""cli-agent: a small, provider-neutral CLI coding agent."""
+"""dcx: a small, provider-neutral CLI coding agent."""
 
 from __future__ import annotations
 

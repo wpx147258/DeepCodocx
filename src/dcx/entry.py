@@ -15,7 +15,7 @@ import click
 from . import __version__
 from .assembly import BuildOptions, RuntimeBundle, build_runtime
 from .cli.repl import RichAsker, run_print, run_repl
-from .errors import CliAgentError
+from .errors import DcxError
 
 
 def _common_options(f: Any) -> Any:
@@ -131,7 +131,7 @@ def _build_options(
 def _load(options: BuildOptions) -> RuntimeBundle:
     try:
         return build_runtime(options)
-    except CliAgentError as exc:
+    except DcxError as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1) from exc
 
@@ -246,7 +246,7 @@ def _merge_common(ctx: click.Context, common: dict[str, Any]) -> None:
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 @_common_options
-@click.version_option(version=__version__, prog_name="cli-agent")
+@click.version_option(version=__version__, prog_name="dcx")
 @click.pass_context
 def main(ctx: click.Context, **common: Any) -> None:
     """Start the REPL. Use ``run`` for one-shot output or ``web`` for the browser."""

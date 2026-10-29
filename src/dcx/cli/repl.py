@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from ..assembly import RuntimeBundle
-from ..errors import CliAgentError
+from ..errors import DcxError
 from ..permissions.policy import Answer, PermissionRequest
 from ..runtime import AgentRuntime
 from .commands import CommandDispatcher
@@ -91,7 +91,7 @@ async def run_repl(bundle: RuntimeBundle, *, show_reasoning: bool = True) -> int
             if current is not None and hasattr(current, "uncancel"):
                 current.uncancel()
             renderer.notice("Cancelled.")
-        except CliAgentError as exc:
+        except DcxError as exc:
             renderer.error(str(exc))
         except Exception as exc:  # noqa: BLE001 - keep the REPL alive
             renderer.error(f"{type(exc).__name__}: {exc}")

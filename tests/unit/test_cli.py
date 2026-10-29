@@ -37,7 +37,7 @@ def test_help(tmp_path: Path) -> None:
 def test_version(tmp_path: Path) -> None:
     result = CliRunner().invoke(main, ["--version"], env=_env(tmp_path))
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    assert result.output.strip() == "dcx, version 0.1.0"
 
 
 def test_missing_key_fails_clearly(tmp_path: Path) -> None:

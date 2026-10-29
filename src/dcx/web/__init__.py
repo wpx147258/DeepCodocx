@@ -1,4 +1,4 @@
-"""Local web client for cli-agent."""
+"""Local web client for dcx."""
 
 from .server import WebAsker, create_app, serve
 

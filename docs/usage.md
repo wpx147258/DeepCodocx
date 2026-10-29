@@ -5,22 +5,22 @@
 ## 三个入口
 
 ```bash
-uv run cli-agent --provider deepseek                    # 交互式终端
-uv run cli-agent web --provider deepseek                # 本地 Web
-uv run cli-agent run --provider deepseek "介绍这个仓库"   # 一次性执行
+uv run dcx --provider deepseek                    # 交互式终端
+uv run dcx web --provider deepseek                # 本地 Web
+uv run dcx run --provider deepseek "介绍这个仓库"   # 一次性执行
 ```
 
-公共选项可以放在子命令前后。运行 `cli-agent --help`、`cli-agent web --help` 或
-`cli-agent run --help` 查看完整参数。Provider 配置见[配置指南](configuration.md)。
+公共选项可以放在子命令前后。运行 `dcx --help`、`dcx web --help` 或
+`dcx run --help` 查看完整参数。Provider 配置见[配置指南](configuration.md)。
 
 ## 会话与连续工作
 
 ```bash
-cli-agent -c                         # 最近的普通会话
-cli-agent --resume SESSION_ID
-cli-agent --resume SESSION_ID --fork
-cli-agent run -c "继续完成剩下的工作"
-cli-agent --mode deepdocx -c          # 最近的文档会话
+dcx -c                         # 最近的普通会话
+dcx --resume SESSION_ID
+dcx --resume SESSION_ID --fork
+dcx run -c "继续完成剩下的工作"
+dcx --mode deepdocx -c          # 最近的文档会话
 ```
 
 显式 provider/model 覆盖保存的设置；仅更换 provider 时采用新 provider 的默认模型。
@@ -43,7 +43,8 @@ Write / Edit 在操作前保存文件检查点。恢复时核对当前文件与�
 Fork 到 DeepDocx 的继承历史只读，回滚边界从进入新会话后开始。
 
 默认地址为 `127.0.0.1:8765`。非 loopback 监听会自动要求 token，也可以通过 `--token`
-显式设置。页面采用 CSP，API 使用 `X-CLI-Agent-Token`。跨网络使用时配合认证代理。
+显式设置。页面采用 CSP，API 使用 `X-DCX-Token`，并兼容旧 `X-CLI-Agent-Token`
+请求头；新请求头存在时优先验证它。跨网络使用时配合认证代理。
 
 ## 权限与工具
 
@@ -63,7 +64,7 @@ allow / deny 规则可进一步控制权限，deny 优先；显式 allow 会优�
 非交互模式的审批默认拒绝。需要执行命令时可以明确使用 allow 规则或 bypass：
 
 ```bash
-cli-agent run --permission-mode bypass "运行测试并总结结果"
+dcx run --permission-mode bypass "运行测试并总结结果"
 ```
 
 ## 终端内命令
@@ -82,8 +83,8 @@ cli-agent run --permission-mode bypass "运行测试并总结结果"
 ## JSON 与 JSONL 输出
 
 ```bash
-printf '总结这个仓库' | cli-agent run --output-format jsonl -
-cli-agent run --output-format json "介绍模块结构"
+printf '总结这个仓库' | dcx run --output-format jsonl -
+dcx run --output-format json "介绍模块结构"
 ```
 
 `text` 输出回复文本；`json` 输出单个结果；`jsonl` 实时逐行输出事件。

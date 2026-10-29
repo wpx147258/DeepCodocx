@@ -8,7 +8,7 @@
 
 ```bash
 uv sync --extra dev
-uv run cli-agent web
+uv run dcx web
 ```
 
 点击顶部 **DeepDocx**，连接文档目录，选择「全新开始」或「Fork 当前对话并继续」。
@@ -18,7 +18,7 @@ uv run cli-agent web
 也可以直接指定已有文档库启动：
 
 ```bash
-uv run cli-agent web --library /path/to/paper-bundles
+uv run dcx web --library /path/to/paper-bundles
 ```
 
 这条命令直接创建 DeepDocx 会话；若希望选择是否继承普通对话，先启动普通 Web
@@ -27,10 +27,10 @@ uv run cli-agent web --library /path/to/paper-bundles
 CLI / headless：
 
 ```bash
-cli-agent run --library /path/to/paper-bundles "结合原文和图示解释 MEMORYVLA 的记忆机制"
-cli-agent --mode deepdocx -c
-cli-agent run --resume SESSION_ID "继续解释下一部分"
-cli-agent run --resume NORMAL_SESSION --fork --library /path/to/paper-bundles "基于已有讨论继续"
+dcx run --library /path/to/paper-bundles "结合原文和图示解释 MEMORYVLA 的记忆机制"
+dcx --mode deepdocx -c
+dcx run --resume SESSION_ID "继续解释下一部分"
+dcx run --resume NORMAL_SESSION --fork --library /path/to/paper-bundles "基于已有讨论继续"
 ```
 
 同一工作目录下，普通 `-c` 只继续最近的普通会话，`--mode deepdocx -c` 继续文档会话。
@@ -38,7 +38,7 @@ cli-agent run --resume NORMAL_SESSION --fork --library /path/to/paper-bundles "�
 
 ## 文档库配置
 
-可在 `~/.config/cli-agent/config.toml` 预设目录：
+可在 `~/.config/dcx/config.toml` 预设目录：
 
 ```toml
 [deepdocx]
@@ -47,13 +47,13 @@ libraries = ["/path/to/deep-docs-unified/data"]
 default_library = "/path/to/deep-docs-unified/data"
 ```
 
-通过页面连接的目录持久保存在 `$XDG_DATA_HOME/cli-agent/libraries.json`。
+通过页面连接的目录持久保存在 `$XDG_DATA_HOME/dcx/libraries.json`。
 成功进入 DeepDocx 时，同时保存最后选择的文档库；关闭页面、重启服务或创建新会话后，
 会自动选中该库，无需重复连接或选择。新增其他目录不会清除已有选择。
 优先级为：当前文档会话的库 → 上次成功选择 → `default_library` → 已配置或已登记的库。
 没有保存或配置文档库时，会检查当前工作目录及附近上级目录中的
 `deep-docs-unified/data`，找到有效 bundle 后直接填入选择器。因此，在相邻目录已存在有效库时，使用
-`cli-agent web` 即可选择该语料；`cli-agent web --mode deepdocx` 可直接使用默认库启动。
+`dcx web` 即可选择该语料；`dcx web --mode deepdocx` 可直接使用默认库启动。
 确实没有可用库时，界面会说明原因并展开目录输入，在连接成功前禁用进入按钮。
 会话的模式、库绑定、文档范围和 fork 边界写入追加式 session 记录；普通旧会话默认
 `normal`。库的选择不改变 cwd，不加载库中的 AGENTS.md，也不把文档任务规则写入

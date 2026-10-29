@@ -27,13 +27,76 @@ def test_defaults_are_generic_and_use_xdg(tmp_path: Path) -> None:
     assert config.permission_mode == "accept-edits"
     assert config.max_turns == 50
     assert "deepseek" in config.providers
-    assert config.paths.config_dir == tmp_path / "config" / "cli-agent"
-    assert config.paths.data_dir == tmp_path / "data" / "cli-agent"
+    assert config.paths.config_dir == tmp_path / "config" / "dcx"
+    assert config.paths.data_dir == tmp_path / "data" / "dcx"
     assert len(config.paths.project_id) == 12
 
 
+def test_legacy_directories_are_reused_without_rewriting_state(tmp_path: Path) -> None:
+    legacy_config = tmp_path / "config" / "cli-agent"
+    legacy_data = tmp_path / "data" / "cli-agent"
+    legacy_config.mkdir(parents=True)
+    legacy_data.mkdir(parents=True)
+    config_file = legacy_config / "config.toml"
+    config_file.write_text('default_provider = "deepseek"\n', encoding="utf-8")
+    libraries = legacy_data / "libraries.json"
+    libraries.write_text('{"libraries": [], "selected_library_id": "saved"}\n')
+    original_config = config_file.read_bytes()
+    original_libraries = libraries.read_bytes()
+
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.default_provider == "deepseek"
+    assert config.paths.config_dir == tmp_path / "config" / "dcx"
+    assert config.paths.data_dir == tmp_path / "data" / "dcx"
+    assert config.paths.config_dir.samefile(legacy_config)
+    assert config.paths.data_dir.samefile(legacy_data)
+    assert (config.paths.data_dir / "libraries.json").read_bytes() == original_libraries
+    assert config_file.read_bytes() == original_config
+    assert libraries.read_bytes() == original_libraries
+    assert AppPaths.discover(tmp_path, _env(tmp_path)) == config.paths
+
+
+def test_existing_dcx_directories_take_precedence_over_legacy(tmp_path: Path) -> None:
+    for name in ("dcx", "cli-agent"):
+        config_dir = tmp_path / "config" / name
+        data_dir = tmp_path / "data" / name
+        config_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True)
+        provider = "deepseek" if name == "dcx" else "anthropic"
+        (config_dir / "config.toml").write_text(f'default_provider = "{provider}"\n')
+        (data_dir / "marker").write_text(name)
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.default_provider == "deepseek"
+    assert not config.paths.config_dir.is_symlink()
+    assert (config.paths.data_dir / "marker").read_text() == "dcx"
+    assert (tmp_path / "data" / "cli-agent" / "marker").read_text() == "cli-agent"
+
+
+@pytest.mark.parametrize("kind", ["config", "data"])
+def test_broken_dcx_alias_fails_instead_of_hiding_state(tmp_path: Path, kind: str) -> None:
+    base = tmp_path / kind
+    base.mkdir()
+    (base / "dcx").symlink_to(base / "missing", target_is_directory=True)
+    with pytest.raises(ConfigError, match="broken symlink"):
+        load_config(cwd=tmp_path, env=_env(tmp_path))
+
+
+def test_legacy_alias_failure_is_reported(tmp_path: Path, monkeypatch) -> None:
+    legacy = tmp_path / "data" / "cli-agent"
+    legacy.mkdir(parents=True)
+
+    def fail_link(*args, **kwargs):
+        raise OSError("links unavailable")
+
+    monkeypatch.setattr(Path, "symlink_to", fail_link)
+    with pytest.raises(ConfigError, match="could not link .*existing state"):
+        load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert legacy.is_dir()
+    assert not (legacy.parent / "dcx").exists()
+
+
 def test_custom_provider_model_rules(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         """
@@ -79,7 +142,7 @@ def test_explicit_missing_config_is_an_error(tmp_path: Path) -> None:
 
 
 def test_invalid_permission_mode(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text('permission_mode = "yolo"', encoding="utf-8")
     with pytest.raises(ConfigError):
@@ -116,7 +179,7 @@ def test_paths_are_project_scoped(tmp_path: Path) -> None:
 
 
 def test_thinking_config_and_capabilities(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         """
@@ -135,7 +198,7 @@ budget_tokens = 4096
 
 
 def test_thinking_budget_floor(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         "[thinking]\nbudget_tokens = 100\n", encoding="utf-8"
@@ -152,7 +215,7 @@ def test_thinking_overrides(tmp_path: Path) -> None:
 
 
 def test_model_can_opt_into_thinking(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         '[models."custom-model"]\nsupports_thinking = true\n',
@@ -174,7 +237,7 @@ def test_deepseek_defaults_to_flash_and_thinking(tmp_path: Path) -> None:
 
 
 def test_explicit_thinking_false_overrides_provider_default(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         "[thinking]\nenabled = false\n", encoding="utf-8"
@@ -184,7 +247,7 @@ def test_explicit_thinking_false_overrides_provider_default(tmp_path: Path) -> N
 
 
 def test_model_override_holds_only_explicit_fields(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         '[models."deepseek-flash[1M]"]\nmax_output_tokens = 4096\n',
@@ -197,7 +260,7 @@ def test_model_override_holds_only_explicit_fields(tmp_path: Path) -> None:
 
 
 def test_memory_enabled_settings(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text("[memory]\nenabled = false\n", encoding="utf-8")
     config = load_config(cwd=tmp_path, env=_env(tmp_path))
@@ -209,7 +272,7 @@ def test_memory_is_enabled_by_default(tmp_path: Path) -> None:
 
 
 def test_legacy_extraction_knobs_are_ignored(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         "[memory]\nenabled = true\nextraction_min_new_messages = 12\n",
@@ -227,7 +290,7 @@ def test_prompt_caching_defaults_and_overrides(tmp_path: Path) -> None:
     profile = build_profile(config, config.providers["anthropic"], "claude-sonnet-4-6")
     assert profile.prompt_caching is True
 
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
@@ -253,7 +316,7 @@ def test_image_capability_defaults_and_overrides(tmp_path: Path) -> None:
     profile = build_profile(config, config.providers["deepseek"], "deepseek-flash[1M]")
     assert profile.supports_images is True
 
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.toml").write_text(
         '[models."text-only"]\nsupports_images = false\n', encoding="utf-8"
@@ -264,7 +327,7 @@ def test_image_capability_defaults_and_overrides(tmp_path: Path) -> None:
 
 
 def test_max_turns_zero_is_rejected(tmp_path: Path) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text("max_turns = 0", encoding="utf-8")
     with pytest.raises(ConfigError, match="max_turns"):
@@ -275,7 +338,7 @@ def test_max_turns_zero_is_rejected(tmp_path: Path) -> None:
 def test_non_positive_max_output_tokens_is_rejected(
     tmp_path: Path, value: int
 ) -> None:
-    config_dir = tmp_path / "config" / "cli-agent"
+    config_dir = tmp_path / "config" / "dcx"
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
         f"[providers.deepseek]\nmax_output_tokens = {value}\n", encoding="utf-8"

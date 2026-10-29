@@ -2,9 +2,13 @@
 
 **简体中文** | [English](configuration.en.md) · [首页](../README.md)
 
-默认读取 `$XDG_CONFIG_HOME/cli-agent/config.toml`，通常是
-`~/.config/cli-agent/config.toml`。也可用 `--config /path/to/config.toml` 指定文件。
+默认读取 `$XDG_CONFIG_HOME/dcx/config.toml`，通常是
+`~/.config/dcx/config.toml`。也可用 `--config /path/to/config.toml` 指定文件。
 完整示例见 [config.example.toml](../config.example.toml)。
+
+运行数据默认位于 `$XDG_DATA_HOME/dcx`，通常是 `~/.local/share/dcx`。升级时，若对应
+`dcx` 目录不存在而旧 `cli-agent` 目录存在，会自动创建指向旧目录的符号链接，继续使用
+原有配置、技能、记忆、会话及文档库选择。已有独立 `dcx` 目录优先；详见[升级说明](troubleshooting.md)。
 
 ## Provider
 
@@ -68,7 +72,7 @@ libraries = ["/path/to/paper-bundles"]
 default_library = "/path/to/paper-bundles"
 ```
 
-界面注册的目录与最后选择保存在 `$XDG_DATA_HOME/cli-agent/libraries.json`。
+界面注册的目录与最后选择保存在 `$XDG_DATA_HOME/dcx/libraries.json`。
 有当前文档会话时优先使用其绑定，否则采用上次选择、配置默认值或已有库。
 没有配置或保存的库时，会发现附近的 `deep-docs-unified/data`。
 更详细的格式和文档范围说明见 [DeepDocx 指南](deepdocx.md)。

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import socket
 import tempfile
 import threading
@@ -25,6 +26,50 @@ from dcx.providers.base import ModelProfile
 from dcx.web.server import create_app
 from tests.support.document_fixture import document_library
 from tests.support.fake_provider import FakeProvider, text_response, tool_response
+
+
+def _check_storage_migration(browser, url, expect) -> None:
+    page = browser.new_page(viewport={"width": 1500, "height": 1000})
+    headers = []
+    page.on(
+        "request",
+        lambda request: headers.append(request.headers)
+        if request.url.endswith("/api/bootstrap") else None,
+    )
+    page.goto(url)
+    page.evaluate("""() => {
+        localStorage.clear();
+        sessionStorage.clear();
+        localStorage.setItem('cli-agent-draft', 'Draft saved before the rename');
+        localStorage.setItem('cli-agent-theme', 'dark');
+        localStorage.setItem('cli-agent-sidebar-width', '320');
+        localStorage.setItem('cli-agent-sidebar-collapsed', '1');
+        sessionStorage.setItem('cli-agent-token', 'saved-token');
+    }""")
+    page.reload()
+    expect(page.locator("#input")).to_have_value("Draft saved before the rename")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    expect(page.locator("body")).to_have_class(re.compile("sidebar-collapsed"))
+    assert page.evaluate("document.documentElement.style.getPropertyValue('--sidebar-w')") == "320px"
+    assert page.evaluate("sessionStorage.getItem('dcx-token')") == "saved-token"
+    assert headers[-1].get("x-dcx-token") == "saved-token"
+    assert page.evaluate("""() =>
+        !Object.keys(localStorage).some(key => key.startsWith('cli-agent-')) &&
+        !Object.keys(sessionStorage).some(key => key.startsWith('cli-agent-'))
+    """)
+    page.locator("#input").fill("")
+    page.evaluate("""() => {
+        localStorage.setItem('dcx-theme', 'light');
+        localStorage.setItem('cli-agent-theme', 'dark');
+        sessionStorage.setItem('dcx-token', 'current-token');
+        sessionStorage.setItem('cli-agent-token', 'stale-token');
+    }""")
+    page.reload()
+    expect(page.locator("#input")).to_have_value("")
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    assert page.evaluate("sessionStorage.getItem('dcx-token')") == "current-token"
+    assert headers[-1].get("x-dcx-token") == "current-token"
+    page.close()
 
 
 def main() -> None:
@@ -131,10 +176,17 @@ def main() -> None:
             try:
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch()
+                    _check_storage_migration(browser, f"http://127.0.0.1:{port}", expect)
                     page = browser.new_page(viewport={"width": 1500, "height": 1000})
                     page.on("pageerror", lambda error: errors.append(str(error)))
                     page.goto(f"http://127.0.0.1:{port}")
-                    expect(page.locator(".brand-name")).to_have_text("cli-agent")
+                    expect(page.locator(".brand-name")).to_have_text("dcx")
+                    expect(page.locator("#messages")).to_contain_text("Earlier discussion about memory.")
+                    if args.output:
+                        args.output.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(
+                            path=str(args.output / "chat-light.png"), animations="disabled"
+                        )
                     page.route(
                         "**/api/libraries",
                         lambda route: route.fulfill(
@@ -174,14 +226,13 @@ def main() -> None:
                     expect(page.locator("#evidence-text")).to_contain_text(expected_text)
                     assert page.locator("#evidence-image").evaluate("image=>image.naturalWidth") > 0
                     if args.output:
-                        args.output.mkdir(parents=True, exist_ok=True)
                         page.screenshot(
                             path=str(args.output / "deepdocx-light.png"), animations="disabled"
                         )
                     page.reload()
                     expect(page.locator(".brand-name")).to_have_text("DeepDocx")
                     page.locator("#deepdocx-entry").click()
-                    expect(page.locator(".brand-name")).to_have_text("cli-agent")
+                    expect(page.locator(".brand-name")).to_have_text("dcx")
                     sessions = page.evaluate("fetch('/api/sessions').then(r=>r.json())")
                     assert [item["id"] for item in sessions["sessions"]] == [original_id]
                     page.locator("#deepdocx-entry").click()
@@ -216,7 +267,7 @@ def main() -> None:
                         )
                     page.set_viewport_size({"width": 1500, "height": 1000})
                     page.locator("#deepdocx-entry").click()
-                    expect(page.locator(".brand-name")).to_have_text("cli-agent")
+                    expect(page.locator(".brand-name")).to_have_text("dcx")
                     page.locator("#deepdocx-entry").click()
                     second = document_library(root / "second-library")
                     if not page.locator(".library-register").evaluate("node => node.open"):
@@ -229,7 +280,7 @@ def main() -> None:
                     page.locator("#deepdocx-enter").click()
                     expect(page.locator(".brand-name")).to_have_text("DeepDocx")
                     page.locator("#deepdocx-entry").click()
-                    expect(page.locator(".brand-name")).to_have_text("cli-agent")
+                    expect(page.locator(".brand-name")).to_have_text("dcx")
                     page.reload()
                     page.locator("#deepdocx-entry").click()
                     expect(page.locator("#deepdocx-library")).to_have_value(chosen_library)
@@ -237,7 +288,7 @@ def main() -> None:
                     assert not errors, errors
                     browser.close()
                 print(
-                    "PASS: default library, empty-state guidance, remembered library selection, fork/new, stdio MCP discovery/search/image, citations, reload, history isolation, dark theme and mobile; no browser errors"
+                    "PASS: storage migration, dcx branding, default library, empty-state guidance, remembered library selection, fork/new, stdio MCP discovery/search/image, citations, reload, history isolation, dark theme and mobile; no browser errors"
                 )
             finally:
                 server.should_exit = True

@@ -12,7 +12,7 @@ from starlette.routing import Route
 
 from ..assembly import build_runtime
 from ..deepdocx.profile import SessionProfile
-from ..errors import CliAgentError
+from ..errors import DcxError
 from ..session.paths import latest_session_id
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ def document_routes(host: WebHost, asker: WebAsker | None) -> list[Route]:
                     "registered_library_id": registered_id,
                 }
             )
-        except (ValueError, OSError, CliAgentError) as exc:
+        except (ValueError, OSError, DcxError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
     async def mode(request: Request) -> Response:
@@ -89,7 +89,7 @@ def document_routes(host: WebHost, asker: WebAsker | None) -> list[Route]:
             bundle = await asyncio.to_thread(build_runtime, options)
             await host.replace_bundle(bundle)
             return JSONResponse(host.state_payload())
-        except (ValueError, OSError, CliAgentError) as exc:
+        except (ValueError, OSError, DcxError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
     async def documents(request: Request) -> Response:

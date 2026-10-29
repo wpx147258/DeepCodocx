@@ -1049,9 +1049,11 @@ def create_app(
         request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         if token and request.url.path.startswith("/api/"):
-            supplied = request.headers.get(
-                "x-cli-agent-token"
-            ) or request.query_params.get("token")
+            supplied = request.headers.get("x-dcx-token")
+            if supplied is None:
+                supplied = request.headers.get("x-cli-agent-token")
+            if supplied is None:
+                supplied = request.query_params.get("token")
             if supplied is None or not secrets.compare_digest(supplied, token):
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
         return await _security_headers(request, call_next)
@@ -1156,5 +1158,5 @@ def serve(
                 time.sleep(0.05)
 
         threading.Thread(target=_open_when_ready, daemon=True).start()
-    print(f"cli-agent web: {url}", flush=True)
+    print(f"dcx web: {url}", flush=True)
     server.run()

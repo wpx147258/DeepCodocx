@@ -12,7 +12,7 @@ uv run pytest -q --cov=dcx --cov-report=term-missing --cov-fail-under=75
 node --check src/dcx/web/static/app.js
 ```
 
-The source package is `src/dcx`; the installed command is `cli-agent`. The CLI,
+The source package is `src/dcx`; the installed command is `dcx`. The CLI,
 Web host, and MCP subprocesses all use this package. See
 [architecture](architecture.en.md) for module boundaries and
 [AGENTS.md](../AGENTS.md) for development rules.
@@ -29,7 +29,7 @@ uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-
 ```
 
 This check uses a scripted provider with the real Web server, stdio MCP, and
-browser. It covers default libraries, remembered selection, fork/new, search,
+browser. It covers legacy browser preference migration, default libraries, remembered selection, fork/new, search,
 images, citations, session isolation, and narrow layouts.
 
 Screenshots in the output directory support visual inspection. Add
@@ -39,13 +39,13 @@ MEMORYVLA Marker bundles. The corpus is accessed read-only.
 ## Live-provider tests
 
 ```bash
-export CLI_AGENT_E2E_PROVIDER=deepseek
+export DCX_E2E_PROVIDER=deepseek
 export DEEPSEEK_API_KEY="your-api-key"
 uv run pytest tests/e2e -q
 ```
 
 These tests make real provider requests and are skipped when no provider is
-configured. Set `CLI_AGENT_E2E_MODEL` to choose the model. The manual CI
+configured. Set `DCX_E2E_MODEL` to choose the model. The manual CI
 `workflow_dispatch` job uses the corresponding repository secret.
 
 ## Contribution guidelines

@@ -3,17 +3,36 @@
 
   const $ = (id) => document.getElementById(id);
 
+  function migrateStorage(name, keys) {
+    for (const key of keys) {
+      try {
+        const storage = window[name];
+        const legacyKey = key.replace(/^dcx-/, "cli-agent-");
+        const legacy = storage.getItem(legacyKey);
+        if (legacy === null) continue;
+        if (storage.getItem(key) === null) storage.setItem(key, legacy);
+        // Remove only after the new value is saved, so cleared drafts stay cleared.
+        storage.removeItem(legacyKey);
+      } catch (_) { /* storage may be unavailable; retry on the next page load */ }
+    }
+  }
+
+  migrateStorage("sessionStorage", ["dcx-token"]);
+  migrateStorage("localStorage", [
+    "dcx-draft", "dcx-theme", "dcx-sidebar-width", "dcx-sidebar-collapsed",
+  ]);
+
   const initialUrl = new URL(window.location.href);
   let accessToken = initialUrl.searchParams.get("token") || "";
   if (accessToken) {
-    try { sessionStorage.setItem("cli-agent-token", accessToken); } catch (_) { /* ignore */ }
+    try { sessionStorage.setItem("dcx-token", accessToken); } catch (_) { /* ignore */ }
     initialUrl.searchParams.delete("token");
     window.history.replaceState({}, "", initialUrl.pathname + initialUrl.search + initialUrl.hash);
   } else {
-    try { accessToken = sessionStorage.getItem("cli-agent-token") || ""; } catch (_) { accessToken = ""; }
+    try { accessToken = sessionStorage.getItem("dcx-token") || ""; } catch (_) { accessToken = ""; }
   }
   function authHeaders() {
-    return accessToken ? { "X-CLI-Agent-Token": accessToken } : {};
+    return accessToken ? { "X-DCX-Token": accessToken } : {};
   }
 
   const state = {
@@ -24,7 +43,7 @@
     permission: null,
     stick: true,
     controller: null,
-    draftKey: "cli-agent-draft",
+    draftKey: "dcx-draft",
     toastTimer: null,
     sessions: [],
     sidebarWidth: 268,
@@ -116,13 +135,13 @@
     document.documentElement.style.setProperty("--sidebar-w", `${clamped}px`);
     state.sidebarWidth = clamped;
     if (persist) {
-      try { localStorage.setItem("cli-agent-sidebar-width", String(clamped)); } catch (_) { /* ignore */ }
+      try { localStorage.setItem("dcx-sidebar-width", String(clamped)); } catch (_) { /* ignore */ }
     }
   }
 
   function loadSidebarWidth() {
     try {
-      const saved = Number(localStorage.getItem("cli-agent-sidebar-width"));
+      const saved = Number(localStorage.getItem("dcx-sidebar-width"));
       if (Number.isFinite(saved) && saved > 0) applySidebarWidth(saved);
     } catch (_) { /* ignore */ }
   }
@@ -196,7 +215,7 @@
     $("menu").setAttribute("aria-label", collapsed ? "Show sidebar" : "Open sidebar");
     if (persist) {
       try {
-        localStorage.setItem("cli-agent-sidebar-collapsed", collapsed ? "1" : "0");
+        localStorage.setItem("dcx-sidebar-collapsed", collapsed ? "1" : "0");
       } catch (_) { /* ignore */ }
     }
     if (collapsed && focus) $("menu").focus();
@@ -204,7 +223,7 @@
 
   function loadSidebarCollapsed() {
     try {
-      if (localStorage.getItem("cli-agent-sidebar-collapsed") === "1") {
+      if (localStorage.getItem("dcx-sidebar-collapsed") === "1") {
         setSidebarCollapsed(true, { persist: false });
       }
     } catch (_) { /* ignore */ }
@@ -1367,10 +1386,10 @@
   function applyDocumentMode(data) {
     const active = data.mode === "deepdocx";
     document.documentElement.dataset.mode = active ? "deepdocx" : "normal";
-    document.querySelector(".brand-name").textContent = active ? "DeepDocx" : "cli-agent";
+    document.querySelector(".brand-name").textContent = active ? "DeepDocx" : "dcx";
     $("deepdocx-entry").textContent = active ? "← Agent" : "▧ DeepDocx";
     $("document-navigation").hidden = !active;
-    $("input").placeholder = active ? "询问论文、粘贴原文，或上传图片…" : "Message cli-agent…";
+    $("input").placeholder = active ? "询问论文、粘贴原文，或上传图片…" : "Message dcx…";
     const empty = $("empty");
     empty.querySelector("h2").textContent = active ? "深入文档，理解每一处细节。" : "What are we building?";
     empty.querySelector("p").textContent = active ? "从文档库定位原文，阅读论文、分析图表，随时查看依据。" : "Ask about the workspace, run commands, or make changes — with approval before anything destructive.";
@@ -1732,7 +1751,7 @@
       toast("This chat is empty.");
       return;
     }
-    const slug = (data.title || "cli-agent-chat")
+    const slug = (data.title || "dcx-chat")
       .toLowerCase()
       .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
       .replace(/^-+|-+$/g, "")
@@ -1751,7 +1770,7 @@
       toast("Chat exported as JSON.");
       return;
     }
-    const lines = [`# ${data.title || "cli-agent chat"}`, ""];
+    const lines = [`# ${data.title || "dcx chat"}`, ""];
     const textOf = (content) => content
       .filter((block) => block.type === "text")
       .map((block) => block.text)
@@ -2194,12 +2213,12 @@
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem("cli-agent-theme", theme); } catch (_) { /* ignore */ }
+    try { localStorage.setItem("dcx-theme", theme); } catch (_) { /* ignore */ }
   }
 
   function initialTheme() {
     try {
-      const saved = localStorage.getItem("cli-agent-theme");
+      const saved = localStorage.getItem("dcx-theme");
       if (saved === "light" || saved === "dark") return saved;
     } catch (_) { /* ignore */ }
     return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -2488,7 +2507,7 @@
           "error"
         );
       } else {
-        systemNote(`Cannot reach cli-agent: ${error.message}`, "error");
+        systemNote(`Cannot reach dcx: ${error.message}`, "error");
       }
     }
     autoGrow();

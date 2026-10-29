@@ -12,7 +12,8 @@ from typing import Any
 
 from .errors import ConfigError
 
-APP_NAME = "cli-agent"
+APP_NAME = "dcx"
+LEGACY_APP_NAME = "cli-agent"
 PERMISSION_MODES = ("bypass", "accept-edits", "default")
 MIN_THINKING_BUDGET = 1_024
 DEFAULT_THINKING_BUDGET = 4_096
@@ -21,6 +22,34 @@ DEFAULT_THINKING_BUDGET = 4_096
 def _xdg_home(env: Mapping[str, str], key: str, fallback: str) -> Path:
     value = env.get(key)
     return Path(value).expanduser() if value else Path.home() / fallback
+
+
+def _app_directory(base: Path) -> Path:
+    """Expose existing state at the new path without moving historical files.
+
+    The alias keeps absolute spill paths and open session locks valid. An
+    existing dcx directory always wins; independent stores are never merged.
+    """
+    current = base / APP_NAME
+    legacy = base / LEGACY_APP_NAME
+    if current.exists():
+        if not current.is_dir():
+            raise ConfigError(f"application path is not a directory: {current}")
+        return current
+    if current.is_symlink():
+        raise ConfigError(f"application directory is a broken symlink: {current}")
+    if legacy.is_dir():
+        try:
+            current.symlink_to(legacy.resolve(), target_is_directory=True)
+        except FileExistsError:
+            # Another process may discover the same directory concurrently.
+            if not current.is_dir():
+                raise ConfigError(f"application path is not a directory: {current}") from None
+        except OSError as exc:
+            raise ConfigError(
+                f"could not link {current} to existing state at {legacy}: {exc}"
+            ) from exc
+    return current
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +63,8 @@ class AppPaths:
     def discover(cls, cwd: str | Path | None = None, env: Mapping[str, str] | None = None) -> AppPaths:
         env = os.environ if env is None else env
         working_dir = Path(cwd or Path.cwd()).expanduser().resolve()
-        config_dir = _xdg_home(env, "XDG_CONFIG_HOME", ".config") / APP_NAME
-        data_dir = _xdg_home(env, "XDG_DATA_HOME", ".local/share") / APP_NAME
+        config_dir = _app_directory(_xdg_home(env, "XDG_CONFIG_HOME", ".config"))
+        data_dir = _app_directory(_xdg_home(env, "XDG_DATA_HOME", ".local/share"))
         project_id = hashlib.sha256(str(working_dir).encode("utf-8")).hexdigest()[:12]
         return cls(config_dir=config_dir, data_dir=data_dir, cwd=working_dir, project_id=project_id)
 

@@ -2,9 +2,15 @@
 
 [简体中文](configuration.md) | **English** · [Home](../README.en.md)
 
-Configuration is read from `$XDG_CONFIG_HOME/cli-agent/config.toml`, normally
-`~/.config/cli-agent/config.toml`. Use `--config /path/to/config.toml` to select
+Configuration is read from `$XDG_CONFIG_HOME/dcx/config.toml`, normally
+`~/.config/dcx/config.toml`. Use `--config /path/to/config.toml` to select
 another file. See [config.example.toml](../config.example.toml) for a full example.
+
+Runtime data uses `$XDG_DATA_HOME/dcx`, normally `~/.local/share/dcx`. On upgrade,
+if a `dcx` directory is absent and the corresponding `cli-agent` directory exists,
+a symlink exposes the existing configuration, skills, memory, sessions, and saved
+libraries at the new path. An existing independent `dcx` directory takes
+precedence. See the [upgrade notes](troubleshooting.en.md).
 
 ## Providers
 
@@ -77,7 +83,7 @@ default_library = "/path/to/paper-bundles"
 ```
 
 Libraries registered in the UI and the last selection are stored in
-`$XDG_DATA_HOME/cli-agent/libraries.json`. An active document session uses its own
+`$XDG_DATA_HOME/dcx/libraries.json`. An active document session uses its own
 binding; otherwise, the last selection, configured default, or available library
 is used. When nothing is configured or saved, a nearby `deep-docs-unified/data`
 can be discovered. See the [DeepDocx guide](deepdocx.en.md) for input formats and

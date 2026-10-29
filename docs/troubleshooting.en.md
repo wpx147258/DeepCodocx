@@ -7,7 +7,7 @@
 Use `--no-open`, then open the printed URL manually in your Windows browser:
 
 ```bash
-uv run cli-agent web --provider deepseek --no-open
+uv run dcx web --provider deepseek --no-open
 ```
 
 ## Address already in use
@@ -16,7 +16,7 @@ Another process is listening on the port. Keep it running and choose a different
 port for DeepCodocx:
 
 ```bash
-uv run cli-agent web --provider deepseek --port 8766 --no-open
+uv run dcx web --provider deepseek --port 8766 --no-open
 ```
 
 On Linux / WSL, `ss -ltnp 'sport = :8765'` shows the current listener.
@@ -29,22 +29,41 @@ run these commands in the new project directory:
 
 ```bash
 deactivate
-uv venv --clear .venv
+uv venv --clear --prompt dcx .venv
 uv sync --extra dev
 source .venv/bin/activate
 ```
 
 Use `deactivate` only when an environment is active. Activation is optional;
-`uv run cli-agent ...` can use the project environment directly. The package is
+`uv run dcx ...` can use the project environment directly. The package is
 `dcx`, so the entry point in `pyproject.toml` must target `dcx.entry:main`.
 
-## Session history disappears after a rename
+## Upgrading from cli-agent to dcx
+
+After updating the code, run `uv sync` and use `uv run dcx ...`. The distribution,
+executable, and Python package are all named `dcx`; the old `cli-agent` command is
+no longer installed. Changing the command name alone does not change the project ID.
+
+Configuration uses `~/.config/dcx` and runtime data uses `~/.local/share/dcx`,
+respecting the corresponding XDG variables. If a new directory is absent but its
+legacy `cli-agent` directory exists, startup creates a `dcx → cli-agent` symlink.
+Original files stay in place, preserving absolute history pointers, session locks,
+and library selections. **Keep the legacy directory: it still holds your data.**
+If both directories exist, `dcx` takes precedence without merging or overwriting
+either store. Failure to create an alias is reported instead of silently starting
+with empty history.
+
+At the same browser origin, old drafts, themes, sidebar preferences, and the
+current tab's token migrate automatically to `dcx-*` keys. Existing new values
+take precedence. A different hostname or port uses separate browser storage.
+
+## Session history disappears after moving the project directory
 
 The project ID is the first 12 characters of the SHA-256 hash of the absolute
-working-directory path. Renaming the directory changes its history namespace.
+working-directory path. Moving or renaming the directory changes its history namespace.
 The original files remain under
-`$XDG_DATA_HOME/cli-agent/projects/<old-project-id>/sessions/`; the default data
-directory is `~/.local/share/cli-agent`.
+`$XDG_DATA_HOME/dcx/projects/<old-project-id>/sessions/`; the default data
+directory is `~/.local/share/dcx`.
 
 Before migrating, stop related session writes and back up the data. Copy session
 directories with non-conflicting IDs into the new project's sessions directory.
@@ -54,8 +73,8 @@ checkpoints separately; checkpoints validate their workspace and content
 hashes.
 
 General and DeepDocx sessions have separate lists, and empty sessions are
-hidden. Refresh the page after recovery to reload the list. Configuration and
-saved library selections continue to use the `cli-agent` XDG paths.
+hidden. Refresh the page after recovery to reload the list. Data accessed through
+a compatibility symlink still resides in its original `cli-agent` directory.
 
 ## Empty document library list
 

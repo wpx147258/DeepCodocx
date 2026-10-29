@@ -54,7 +54,7 @@ class Renderer:
         permission_mode: str = "default",
     ) -> None:
         self.console.print(
-            f"[bold]cli-agent[/bold] · {escape(provider)}/{escape(model)} · "
+            f"[bold]dcx[/bold] · {escape(provider)}/{escape(model)} · "
             f"session {escape(session_id)}"
         )
         if permission_mode == "bypass":

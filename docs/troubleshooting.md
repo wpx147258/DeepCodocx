@@ -7,7 +7,7 @@
 使用 `--no-open`，在 Windows 浏览器手动打开终端显示的地址：
 
 ```bash
-uv run cli-agent web --provider deepseek --no-open
+uv run dcx web --provider deepseek --no-open
 ```
 
 ## address already in use
@@ -15,7 +15,7 @@ uv run cli-agent web --provider deepseek --no-open
 另一个进程已经监听该端口。可以保留它，为 DeepCodocx 选择另一个端口：
 
 ```bash
-uv run cli-agent web --provider deepseek --port 8766 --no-open
+uv run dcx web --provider deepseek --port 8766 --no-open
 ```
 
 在 Linux / WSL 上，`ss -ltnp 'sport = :8765'` 可查看当前监听者。
@@ -27,26 +27,40 @@ Python 虚拟环境的激活脚本和命令入口包含绝对路径，移动目�
 
 ```bash
 deactivate
-uv venv --clear .venv
+uv venv --clear --prompt dcx .venv
 uv sync --extra dev
 source .venv/bin/activate
 ```
 
-`deactivate` 只在当前已激活环境时使用。无需激活也可以直接 `uv run cli-agent ...`。
+`deactivate` 只在当前已激活环境时使用。无需激活也可以直接 `uv run dcx ...`。
 包名为 `dcx`，`pyproject.toml` 的入口应指向 `dcx.entry:main`。
 
-## 更名后历史会话不见了
+## 从 cli-agent 升级到 dcx
 
-项目 ID 按工作目录绝对路径的 SHA-256 前 12 位生成。更名会切换历史命名空间，旧文件
-仍位于 `$XDG_DATA_HOME/cli-agent/projects/<旧项目 ID>/sessions/`，默认数据目录是
-`~/.local/share/cli-agent`。
+更新代码后执行 `uv sync`，再使用 `uv run dcx ...`。发行包、可执行命令与 Python 包名
+均为 `dcx`；旧 `cli-agent` 命令不再安装。仅更改命令名不会改变项目 ID。
+
+配置目录改为 `~/.config/dcx`，数据目录改为 `~/.local/share/dcx`，并遵循对应的 XDG
+环境变量。若新目录不存在、旧 `cli-agent` 目录存在，首次启动会创建 `dcx → cli-agent`
+符号链接。原文件保持在原处，历史中的绝对路径、会话锁和文档库选择继续有效；
+**保留旧目录，不要删除链接所指向的数据**。两套目录都存在时优先使用 `dcx`，不会
+自动合并或覆盖。无法创建链接时会报错，不会悄悄切换到空白历史。
+
+在同一浏览器地址下，旧版的草稿、主题、侧栏设置及当前标签页的 token 会自动转为
+`dcx-*` 存储键。已有的新设置优先；更换主机或端口会使用浏览器的另一套存储。
+
+## 移动项目目录后历史会话不见了
+
+项目 ID 按工作目录绝对路径的 SHA-256 前 12 位生成。移动或重命名项目目录会切换历史命名空间，旧文件
+仍位于 `$XDG_DATA_HOME/dcx/projects/<旧项目 ID>/sessions/`，默认数据目录是
+`~/.local/share/dcx`。
 
 迁移时先停止相关会话写入、备份数据，再将旧 sessions 中不重名的目录复制到新项目的
 sessions 目录。保留 session id、记录内容、资源和时间戳；遇到同名目录应比较内容，
 不覆盖已有会话。记忆和检查点也需要单独核对；检查点含工作目录和内容 hash 校验。
 
 普通与 DeepDocx 历史分开显示，空白会话不会出现在列表中。恢复后刷新页面即可重新
-读取列表。配置目录和已选文档库仍使用 `cli-agent` 的 XDG 路径。
+读取列表。通过旧目录兼容链接访问的数据仍保存在原来的 `cli-agent` 目录中。
 
 ## 文档库列表为空
 

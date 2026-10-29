@@ -22,7 +22,7 @@ def styled_prompt(text: str) -> str:
     return f"\001\033[36m\002{text}\001\033[0m\002"
 
 
-def read_user_input(prompt: str = "cli-agent > ") -> str | None:
+def read_user_input(prompt: str = "dcx > ") -> str | None:
     """Read one user message. Returns None on EOF; KeyboardInterrupt propagates."""
     try:
         first = input(styled_prompt(prompt))

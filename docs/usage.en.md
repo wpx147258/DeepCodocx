@@ -5,23 +5,23 @@
 ## Three entry points
 
 ```bash
-uv run cli-agent --provider deepseek                    # Interactive terminal
-uv run cli-agent web --provider deepseek                # Local Web interface
-uv run cli-agent run --provider deepseek "Describe this repository"  # One shot
+uv run dcx --provider deepseek                    # Interactive terminal
+uv run dcx web --provider deepseek                # Local Web interface
+uv run dcx run --provider deepseek "Describe this repository"  # One shot
 ```
 
-Common options can appear before or after the subcommand. Run `cli-agent --help`,
-`cli-agent web --help`, or `cli-agent run --help` for all options. Provider setup
+Common options can appear before or after the subcommand. Run `dcx --help`,
+`dcx web --help`, or `dcx run --help` for all options. Provider setup
 is covered in the [configuration guide](configuration.en.md).
 
 ## Sessions and continuing work
 
 ```bash
-cli-agent -c                         # Latest general session
-cli-agent --resume SESSION_ID
-cli-agent --resume SESSION_ID --fork
-cli-agent run -c "Continue the remaining work"
-cli-agent --mode deepdocx -c          # Latest document session
+dcx -c                         # Latest general session
+dcx --resume SESSION_ID
+dcx --resume SESSION_ID --fork
+dcx run -c "Continue the remaining work"
+dcx --mode deepdocx -c          # Latest document session
 ```
 
 Explicit provider/model choices override saved settings. Changing only the
@@ -56,7 +56,9 @@ session's fork boundary.
 
 The default address is `127.0.0.1:8765`. Non-loopback binds automatically require
 a token; `--token` sets one explicitly. The page uses CSP, and API requests use
-`X-CLI-Agent-Token`. Pair network exposure with an authenticated proxy.
+`X-DCX-Token`. The legacy `X-CLI-Agent-Token` header remains accepted; when the
+new header is present, it takes precedence. Pair network exposure with an
+authenticated proxy.
 
 ## Permissions and tools
 
@@ -80,7 +82,7 @@ Non-interactive approval requests are denied by default. To run commands, use
 explicit allow rules or choose bypass:
 
 ```bash
-cli-agent run --permission-mode bypass "Run the tests and summarize the results"
+dcx run --permission-mode bypass "Run the tests and summarize the results"
 ```
 
 ## Terminal commands
@@ -99,8 +101,8 @@ cli-agent run --permission-mode bypass "Run the tests and summarize the results"
 ## JSON and JSONL output
 
 ```bash
-printf 'Summarize this repository' | cli-agent run --output-format jsonl -
-cli-agent run --output-format json "Describe the module structure"
+printf 'Summarize this repository' | dcx run --output-format jsonl -
+dcx run --output-format json "Describe the module structure"
 ```
 
 `text` emits assistant text, `json` emits one result object, and `jsonl` streams
