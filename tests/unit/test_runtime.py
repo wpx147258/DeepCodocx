@@ -743,6 +743,28 @@ async def test_write_tool_creates_a_restorable_checkpoint(tmp_path: Path) -> Non
     await runtime.close()
 
 
+async def test_restore_can_keep_the_conversation(tmp_path: Path) -> None:
+    from cli_agent.tools.builtin.files import WriteTool
+
+    provider = FakeProvider(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ]
+    )
+    runtime, _ = make_runtime(provider, tmp_path=tmp_path, tools=[WriteTool()])
+    await _consume(runtime, "write a note")
+    before = runtime.messages
+
+    result = runtime.restore_checkpoints(last_user=True)
+    assert result.restored == ("note.txt",)
+    assert not (tmp_path / "note.txt").exists()
+    assert runtime.messages == before
+    # The manifest now records the restored state, so a repeat is a no-op.
+    assert not runtime.preview_checkpoints(last_user=True).files
+    await runtime.close()
+
+
 async def test_bad_checkpoint_path_does_not_break_the_turn(tmp_path: Path) -> None:
     from cli_agent.tools.builtin.files import WriteTool
 

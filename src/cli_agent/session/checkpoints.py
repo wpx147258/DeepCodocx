@@ -10,13 +10,14 @@ only; they are not generally reversible.
 from __future__ import annotations
 
 import contextlib
+import difflib
 import hashlib
 import json
 import logging
 import re
 import stat as stat_module
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,9 @@ MAX_CHECKPOINTS = 100
 MAX_AGE_DAYS = 30
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_TURN_BYTES = 50 * 1024 * 1024
+MAX_DIFF_BYTES = 64 * 1024
+MAX_DIFF_LINES = 800
+MAX_DIFF_INPUT_BYTES = 1024 * 1024
 _SHELL_COMMAND_CHARS = 200
 _TURN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -70,6 +74,34 @@ class PreviewFile:
             "path": self.path,
             "status": self.status,
             "conflict": self.conflict,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FileDiff:
+    """What restoring one checkpointed file would change right now."""
+
+    path: str
+    status: str
+    conflict: bool
+    diff: str = ""
+    truncated: bool = False
+    binary: bool = False
+    current_bytes: int | None = None
+    restored_bytes: int | None = None
+    warning: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "status": self.status,
+            "conflict": self.conflict,
+            "diff": self.diff,
+            "truncated": self.truncated,
+            "binary": self.binary,
+            "current_bytes": self.current_bytes,
+            "restored_bytes": self.restored_bytes,
+            "warning": self.warning,
         }
 
 
@@ -326,6 +358,98 @@ class CheckpointStore:
             partial=partial,
             restorable=restorable,
         )
+
+    def diff(self, turn_ids: list[str] | tuple[str, ...], path: str) -> FileDiff:
+        """Return a bounded diff from the current file to the restore target.
+
+        Only paths that belong to the checkpoint can be inspected, and the
+        current file is read through the same containment checks used by
+        ``restore``. Large or binary files return a warning instead of a diff.
+        """
+        load_warnings: list[str] = []
+        manifests = self._load_manifests(turn_ids, load_warnings)
+        if not manifests:
+            raise ValueError("no checkpoint is available for this rewind")
+        before, after, _, _, manifest_warnings, _ = self._merge(manifests)
+        rel = path.strip()
+        if rel not in before:
+            raise ValueError("file is not part of this checkpoint")
+        old = before[rel]
+        new = after[rel]
+        status = _status(old, new)
+        if status is None:
+            raise ValueError("file has no change in this checkpoint")
+        conflict = not self._current_matches(rel, new)
+        warning = "; ".join((*manifest_warnings, *load_warnings))
+
+        current: bytes | None = None
+        current_present = False
+        current_known = True
+        target = self._safe_target(rel)
+        if target is None:
+            current_known = False
+            warning = _join_warning(warning, "current path is not safely readable")
+        else:
+            state = self._read_state(target)
+            if state is None:
+                current_known = False
+                warning = _join_warning(
+                    warning, "current file is not a regular file or is too large"
+                )
+            elif state[0] == "present":
+                current_present = True
+                current = state[3]
+
+        restored: bytes | None = None
+        if old[0] == "present":
+            if old[1] is None or not _HASH.fullmatch(old[1]) or not self._blob_ok(old[1]):
+                warning = _join_warning(
+                    warning, "checkpoint backup is missing or corrupt"
+                )
+            else:
+                try:
+                    restored = self._blob_path(old[1]).read_bytes()
+                except OSError:
+                    warning = _join_warning(warning, "checkpoint backup could not be read")
+
+        result = FileDiff(
+            path=rel,
+            status=status,
+            conflict=conflict,
+            current_bytes=len(current) if current is not None else None,
+            restored_bytes=len(restored) if restored is not None else None,
+            warning=warning,
+        )
+        if restored is None:
+            if old[0] == "present":
+                return result
+            restored = b""
+        if not current_known:
+            return result
+        if current is None:
+            current = b""
+        if len(current) > MAX_DIFF_INPUT_BYTES or len(restored) > MAX_DIFF_INPUT_BYTES:
+            return replace(
+                result,
+                warning=_join_warning(
+                    warning, "file is too large for a diff preview"
+                ),
+            )
+        if b"\0" in current or b"\0" in restored:
+            return replace(result, binary=True)
+        if current == restored:
+            return replace(
+                result,
+                diff="(contents already match the restore target; only the mode may change)",
+            )
+
+        diff_text, truncated = _unified_diff(
+            current,
+            restored,
+            current_label="current" if current_present else "current (absent)",
+            restored_label="restored" if old[0] == "present" else "restored (removed)",
+        )
+        return replace(result, diff=diff_text, truncated=truncated)
 
     def restore(
         self, turn_ids: list[str] | tuple[str, ...], *, force: bool = False
@@ -837,3 +961,45 @@ def _status(
     ):
         return "modified"
     return None
+
+
+def _join_warning(existing: str, extra: str) -> str:
+    return f"{existing}; {extra}" if existing else extra
+
+
+def _unified_diff(
+    current: bytes,
+    restored: bytes,
+    *,
+    current_label: str,
+    restored_label: str,
+) -> tuple[str, bool]:
+    """Diff two bounded texts, stopping at the output limits."""
+    current_text = current.decode("utf-8", errors="replace")
+    restored_text = restored.decode("utf-8", errors="replace")
+    chunks: list[str] = []
+    size = 0
+    truncated = False
+    for line in difflib.unified_diff(
+        current_text.splitlines(),
+        restored_text.splitlines(),
+        fromfile=current_label,
+        tofile=restored_label,
+        lineterm="",
+        n=3,
+    ):
+        if len(chunks) >= MAX_DIFF_LINES or size + len(line) + 1 > MAX_DIFF_BYTES:
+            truncated = True
+            break
+        chunks.append(line)
+        size += len(line) + 1
+    if not chunks:
+        return (
+            "(contents differ but no textual lines changed; "
+            "the mode or line endings may differ)",
+            False,
+        )
+    text = "\n".join(chunks)
+    if truncated:
+        text += "\n… diff truncated"
+    return text, truncated

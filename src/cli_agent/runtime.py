@@ -48,7 +48,12 @@ from .providers.base import (
     ThinkingConfig,
 )
 from .runtime_attempt import Attempt, stream_attempt
-from .session.checkpoints import CheckpointPreview, CheckpointStore, RestoreResult
+from .session.checkpoints import (
+    CheckpointPreview,
+    CheckpointStore,
+    FileDiff,
+    RestoreResult,
+)
 from .session.store import SessionStore
 from .tools.base import ToolContext, ToolResult
 from .tools.execution import ToolExecutor
@@ -364,6 +369,21 @@ class AgentRuntime:
         if not result.aborted:
             self._deps.checkpoints.mark_restored(turn_ids)
         return result
+
+    def diff_checkpoint(
+        self,
+        *,
+        path: str,
+        message_id: str | None = None,
+        last_user: bool = False,
+    ) -> FileDiff:
+        """Preview what restoring one file would change, without touching it."""
+        if self._deps.checkpoints is None:
+            raise ValueError("checkpoints are not available for this session")
+        _, turn_ids = self._rewind_target(
+            message_id=message_id, last_user=last_user
+        )
+        return self._deps.checkpoints.diff(turn_ids, path)
 
     def _rewind_target(
         self, *, message_id: str | None = None, last_user: bool = False

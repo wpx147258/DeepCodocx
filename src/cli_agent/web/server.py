@@ -917,6 +917,22 @@ def create_app(
             return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(preview.to_dict())
 
+    async def rewind_diff(request: Request) -> Response:
+        body = await _json_object(request)
+        if body is None:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if host.busy:
+            return JSONResponse({"error": "stop the current turn first"}, status_code=409)
+        try:
+            target = rewind_target(body)
+            path = body.get("path")
+            if not isinstance(path, str) or not path.strip() or len(path) > 4096:
+                raise ValueError("path is required")
+            result = host.runtime.diff_checkpoint(**target, path=path)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(result.to_dict())
+
     async def rewind(request: Request) -> Response:
         body = await _json_object(request)
         if body is None:
@@ -927,44 +943,57 @@ def create_app(
             target = rewind_target(body)
             preview = host.runtime.preview_checkpoints(**target)
             files_choice = body.get("files")
+            if files_choice not in (None, "restore", "keep"):
+                raise ValueError("files must be 'restore' or 'keep'")
+            conversation = body.get("conversation", "rewind")
+            if conversation not in ("rewind", "keep"):
+                raise ValueError("conversation must be 'rewind' or 'keep'")
+
+            # Only real file changes need a decision. Shell commands alone are
+            # surfaced as information; asking on every `ls` made the dialog
+            # appear on nearly every regenerate.
+            if preview.files and files_choice is None:
+                return JSONResponse(
+                    {
+                        "error": "rewind requires a files decision",
+                        "preview": preview.to_dict(),
+                    },
+                    status_code=409,
+                )
+
             restored = None
-            if (
-                preview.has_changes
-                or preview.shell_ran
-                or preview.partial
-                or preview.warnings
-            ):
-                if files_choice not in ("restore", "keep"):
+            if files_choice == "restore":
+                if not preview.files:
+                    raise ValueError("there are no checkpointed file changes to restore")
+                restored = host.runtime.restore_checkpoints(
+                    **target, force=body.get("force") is True
+                )
+                if restored.aborted:
                     return JSONResponse(
                         {
-                            "error": "rewind requires a files decision",
+                            "error": "code restore was not completed",
                             "preview": preview.to_dict(),
+                            "restore": restored.to_dict(),
                         },
                         status_code=409,
                     )
-                if files_choice == "restore":
-                    restored = host.runtime.restore_checkpoints(
-                        **target, force=body.get("force") is True
-                    )
-                    if restored.aborted:
-                        return JSONResponse(
-                            {
-                                "error": "code restore was not completed",
-                                "preview": preview.to_dict(),
-                                "restore": restored.to_dict(),
-                            },
-                            status_code=409,
-                        )
-            if target.get("last_user"):
-                await host.runtime.rewind_last_user_turn()
-            else:
-                await host.runtime.rewind_to(str(target["message_id"]))
+
+            if conversation == "keep" and restored is None:
+                raise ValueError("nothing to rewind")
+
+            if conversation == "rewind":
+                if target.get("last_user"):
+                    await host.runtime.rewind_last_user_turn()
+                else:
+                    await host.runtime.rewind_to(str(target["message_id"]))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         payload = host.state_payload()
         payload["rewind"] = {
             "preview": preview.to_dict(),
             "restore": restored.to_dict() if restored is not None else None,
+            "files": files_choice,
+            "conversation": conversation,
         }
         return JSONResponse(payload)
 
@@ -1036,6 +1065,7 @@ def create_app(
         Route("/api/new", new_session, methods=["POST"]),
         Route("/api/open", open_session, methods=["POST"]),
         Route("/api/rewind", rewind, methods=["POST"]),
+        Route("/api/rewind/diff", rewind_diff, methods=["POST"]),
         Route("/api/rewind/preview", rewind_preview, methods=["POST"]),
         Route("/api/model", model, methods=["POST"]),
         Route("/api/auto", auto, methods=["POST"]),

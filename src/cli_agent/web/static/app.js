@@ -34,6 +34,7 @@
     searchQuery: "",
     searchTimer: null,
     rewindResolve: null,
+    rewindConflicts: [],
   };
 
   // ------------------------------------------------------------------ utils
@@ -410,6 +411,11 @@
     }
     if (messageId) {
       const actions = h("div", "msg-actions");
+      const rewind = h("button", "msg-action", "Rewind");
+      rewind.type = "button";
+      rewind.title = "Rewind files and/or conversation to before this message";
+      rewind.addEventListener("click", () => startRewind(messageId));
+      actions.appendChild(rewind);
       const edit = h("button", "msg-action", "Edit");
       edit.type = "button";
       edit.title = "Edit and resend";
@@ -952,62 +958,220 @@
     if (resolve) resolve(value);
   }
 
-  function askRewind(preview) {
+  function addRewindChoice(value, label, detail, { checked = false, disabled = false } = {}) {
+    const row = document.createElement("label");
+    row.className = `rewind-choice${disabled ? " disabled" : ""}`;
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "rewind-choice";
+    input.value = value;
+    input.checked = checked;
+    input.disabled = disabled;
+    const text = h("span", "rewind-choice-text");
+    text.appendChild(h("strong", "", label));
+    if (detail) text.appendChild(h("em", "", detail));
+    row.append(input, text);
+    $("rewind-choices").appendChild(row);
+  }
+
+  function updateRewindConfirm() {
+    const checked = $("rewind-choices").querySelector(
+      'input[name="rewind-choice"]:checked'
+    );
+    const value = checked ? checked.value : "conversation";
+    const force = value !== "conversation" && (state.rewindConflicts || []).length > 0;
+    const confirm = $("rewind-confirm");
+    confirm.textContent = force ? "Restore anyway" : "Continue";
+    confirm.classList.toggle("danger", force);
+  }
+
+  function renderRewindDiff(pre, text) {
+    pre.textContent = "";
+    for (const line of text.split("\n")) {
+      let kind = "";
+      if (line.startsWith("@@")) kind = "hunk";
+      else if (line.startsWith("+++") || line.startsWith("---")) kind = "meta";
+      else if (line.startsWith("+")) kind = "add";
+      else if (line.startsWith("-")) kind = "del";
+      pre.appendChild(h("span", kind, `${line}\n`));
+    }
+  }
+
+  function describeBytes(value) {
+    if (value === null || value === undefined) return "absent";
+    return `${value} byte${value === 1 ? "" : "s"}`;
+  }
+
+  async function toggleRewindDiff(button, pre, target, path) {
+    if (!pre.hidden) {
+      pre.hidden = true;
+      button.textContent = "Diff";
+      return;
+    }
+    if (pre.dataset.loaded === "true") {
+      pre.hidden = false;
+      button.textContent = "Hide";
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Loading…";
+    try {
+      const data = await api("/api/rewind/diff", { ...target, path });
+      const note = data.warning ? `${data.warning}\n` : "";
+      if (data.binary) {
+        pre.textContent =
+          `${note}Binary file: ${describeBytes(data.current_bytes)} → ` +
+          `${describeBytes(data.restored_bytes)}. No textual diff.`;
+      } else {
+        renderRewindDiff(pre, note + data.diff);
+      }
+      pre.dataset.loaded = "true";
+      pre.hidden = false;
+      button.textContent = "Hide";
+    } catch (error) {
+      pre.textContent = error.message;
+      pre.hidden = false;
+      button.textContent = "Retry";
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function askRewind(preview, { mode = "turn", target = {} } = {}) {
     return new Promise((resolve) => {
       state.rewindResolve = resolve;
+      state.rewindConflicts = preview.conflicts || [];
       const files = preview.files || [];
-      const conflicts = preview.conflicts || [];
-      const partial = preview.partial === true;
-      const incomplete = partial || ((preview.warnings || []).length > 0 && !files.length);
-      $("rewind-title").textContent = files.length
-        ? "Rewind code changes?"
-        : incomplete
-          ? "Some changes were not checkpointed"
-          : "Shell changes cannot be reverted";
-      $("rewind-summary").textContent = files.length
-        ? `${files.length} file${files.length === 1 ? "" : "s"} changed in the turns being removed.`
-        : incomplete
-          ? "Some files were too large or otherwise could not be checkpointed."
-          : "The turns being removed ran shell commands. Their effects are not tracked.";
+      const conflicts = state.rewindConflicts;
+      const restorable = preview.restorable !== false;
+      const canCode = files.length > 0 && restorable;
+      const global = mode === "global";
+      const n = files.length;
+      const shellOnly = !n && preview.shell_ran;
+      const incomplete = !n && (preview.partial === true || (preview.warnings || []).length > 0);
+
+      $("rewind-title").textContent = canCode
+        ? global
+          ? "Rewind to this message?"
+          : "Rewind code changes?"
+        : n
+          ? "Code cannot be restored"
+          : incomplete
+            ? "Some changes were not checkpointed"
+            : "Rewind conversation?";
+      $("rewind-summary").textContent = canCode
+        ? `${n} file${n === 1 ? "" : "s"} changed in the turns being rewound.`
+        : n
+          ? "A checkpoint backup is missing or incomplete, so only the conversation can be rewound."
+          : shellOnly
+            ? "No file changes were checkpointed. The turns being rewound ran shell commands; their effects are not tracked."
+            : "No file changes were checkpointed for this rewind.";
+
       const list = $("rewind-files");
       list.textContent = "";
       for (const file of files) {
         const row = document.createElement("li");
-        row.appendChild(h("span", "rewind-path", file.path));
-        const status = h(
-          "span",
-          `rewind-status${file.conflict ? " conflict" : ""}`,
-          file.conflict ? "conflict" : file.status
+        row.className = "rewind-file";
+        const head = h("div", "rewind-file-head");
+        head.appendChild(h("span", "rewind-path", file.path));
+        head.appendChild(
+          h(
+            "span",
+            `rewind-status${file.conflict ? " conflict" : ""}`,
+            file.conflict ? "conflict" : file.status
+          )
         );
-        row.appendChild(status);
+        if (file.conflict) {
+          const button = h("button", "rewind-diff-toggle", "Diff");
+          button.type = "button";
+          button.title = "Show what restoring this file would change";
+          const pre = h("pre", "rewind-diff");
+          pre.hidden = true;
+          button.addEventListener("click", () =>
+            toggleRewindDiff(button, pre, target, file.path)
+          );
+          head.appendChild(button);
+          row.appendChild(head);
+          row.appendChild(pre);
+        } else {
+          row.appendChild(head);
+        }
         list.appendChild(row);
       }
-      list.hidden = files.length === 0;
+      list.hidden = n === 0;
+
       const warnings = [...(preview.warnings || [])];
       if (preview.shell_ran) {
-        warnings.unshift("Shell commands ran; only files changed by Write/Edit can be restored.");
+        warnings.unshift(
+          canCode
+            ? "Shell commands ran; only files changed by Write/Edit can be restored."
+            : "Shell commands ran; their effects are not tracked."
+        );
         if ((preview.commands || []).length) {
           warnings.push(`Shell: ${preview.commands.slice(0, 4).join(" · ")}`);
         }
       }
       if (conflicts.length) {
-        warnings.push("Files marked conflict changed after the turn; restoring overwrites those edits.");
+        warnings.push(
+          "Files marked conflict changed after the turn; restoring overwrites those edits. " +
+            "Choose Diff to see what would be lost."
+        );
       }
       $("rewind-warning").textContent = warnings.join("\n");
       $("rewind-warning").hidden = warnings.length === 0;
-      const restore = $("rewind-restore");
-      const canRestore = files.length > 0 && preview.restorable !== false;
-      restore.hidden = !canRestore;
-      restore.classList.toggle("danger", conflicts.length > 0);
-      restore.textContent = conflicts.length ? "Restore anyway" : "Restore code & continue";
-      $("rewind-keep").textContent = files.length ? "Conversation only" : "Continue";
+
+      const choices = $("rewind-choices");
+      choices.textContent = "";
+      const preferConversation = conflicts.length > 0;
+      if (canCode && global) {
+        addRewindChoice(
+          "both",
+          "Restore code and conversation",
+          "Files go back to before this message; it and everything after it are removed.",
+          { checked: !preferConversation }
+        );
+        addRewindChoice(
+          "code",
+          "Restore code only",
+          "Keep this conversation and restore the files to before this message."
+        );
+        addRewindChoice(
+          "conversation",
+          "Restore conversation only",
+          "Remove this message and everything after it; leave files as they are.",
+          { checked: preferConversation }
+        );
+      } else if (canCode) {
+        addRewindChoice(
+          "both",
+          "Restore code and continue",
+          "Files go back; this and later messages are removed.",
+          { checked: !preferConversation }
+        );
+        addRewindChoice(
+          "conversation",
+          "Conversation only",
+          "Keep files as they are; this and later messages are removed.",
+          { checked: preferConversation }
+        );
+      } else {
+        addRewindChoice(
+          "conversation",
+          global ? "Rewind conversation" : "Skip code restore",
+          global
+            ? "Remove this message and everything after it."
+            : "Keep files as they are and rewind the conversation.",
+          { checked: true }
+        );
+      }
+      updateRewindConfirm();
       $("rewind").hidden = false;
       document.querySelector(".app").inert = true;
-      setTimeout(() => (canRestore ? restore : $("rewind-keep")).focus(), 30);
+      setTimeout(() => $("rewind-confirm").focus(), 30);
     });
   }
 
-  async function performRewind(target) {
+  async function performRewind(target, { mode = "turn" } = {}) {
     let preview;
     try {
       preview = await api("/api/rewind/preview", target);
@@ -1015,35 +1179,42 @@
       toast(error.message);
       return false;
     }
-    let choice = null;
-    if (
-      preview.has_changes ||
-      preview.shell_ran ||
-      preview.partial ||
-      (preview.warnings || []).length
-    ) {
-      choice = await askRewind(preview);
-      if (!choice) return false;
+    let decision = { files: "keep", conversation: "rewind", force: false };
+    // Turn flows (edit/regenerate) only need a decision when files changed.
+    // The global rewind action always shows the choice, because it is explicit
+    // and the user may want to restore code independently of the conversation.
+    if (mode === "global" || (preview.files || []).length) {
+      decision = await askRewind(preview, { mode, target });
+      if (!decision) return false;
     }
-    const payload = { ...target };
-    if (choice === "keep") payload.files = "keep";
-    if (choice === "restore" || choice === "force") payload.files = "restore";
-    if (choice === "force") payload.force = true;
+    const payload = {
+      ...target,
+      files: decision.files,
+      conversation: decision.conversation,
+    };
+    if (decision.force) payload.force = true;
     try {
       const data = await api("/api/rewind", payload);
       applyState(data, { render: true });
-      if (data.rewind?.restore?.warnings?.length) {
-        toast("Rewind completed with warnings.");
-      } else if (data.rewind?.restore?.restored?.length) {
+      const restored = data.rewind?.restore?.restored?.length || 0;
+      if (restored) {
+        const suffix = decision.conversation === "keep" ? "; conversation kept" : "";
         toast(
-          `Restored ${data.rewind.restore.restored.length} file${data.rewind.restore.restored.length === 1 ? "" : "s"}.`
+          `Restored ${restored} file${restored === 1 ? "" : "s"}${suffix}.`
         );
+      } else if (preview.shell_ran && mode === "global") {
+        toast("Conversation rewound; shell effects were not reverted.");
       }
       return true;
     } catch (error) {
       toast(error.message);
       return false;
     }
+  }
+
+  async function startRewind(messageId) {
+    if (state.busy) { toast("Stop the current turn first."); return; }
+    await performRewind({ message_id: messageId }, { mode: "global" });
   }
 
   async function regenerateLastTurn() {
@@ -1912,10 +2083,20 @@
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
     });
     $("rewind-cancel").addEventListener("click", () => closeRewind(null));
-    $("rewind-keep").addEventListener("click", () => closeRewind("keep"));
-    $("rewind-restore").addEventListener("click", () => {
-      const conflicts = $("rewind-restore").classList.contains("danger");
-      closeRewind(conflicts ? "force" : "restore");
+    $("rewind-choices").addEventListener("change", updateRewindConfirm);
+    $("rewind-confirm").addEventListener("click", () => {
+      const checked = $("rewind-choices").querySelector(
+        'input[name="rewind-choice"]:checked'
+      );
+      const value = checked ? checked.value : "conversation";
+      const force = value !== "conversation" && (state.rewindConflicts || []).length > 0;
+      if (value === "both") {
+        closeRewind({ files: "restore", conversation: "rewind", force });
+      } else if (value === "code") {
+        closeRewind({ files: "restore", conversation: "keep", force });
+      } else {
+        closeRewind({ files: "keep", conversation: "rewind", force: false });
+      }
     });
     $("rewind").addEventListener("click", (event) => {
       if (event.target === $("rewind")) closeRewind(null);

@@ -731,7 +731,42 @@ async def test_rewind_conflict_requires_force(client_factory, tmp_path: Path) ->
         assert not (tmp_path / "note.txt").exists()
 
 
-async def test_shell_only_rewind_requires_acknowledgement(
+async def test_rewind_diff_previews_a_conflict(
+    client_factory, tmp_path: Path
+) -> None:
+    (tmp_path / "note.txt").write_text("original\n", encoding="utf-8")
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "edit the note"})
+        (tmp_path / "note.txt").write_text("manual\n", encoding="utf-8")
+
+        response = await client.post(
+            "/api/rewind/diff", json={"last_user": True, "path": "note.txt"}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["conflict"] is True
+        assert "-manual" in body["diff"]
+        assert "+original" in body["diff"]
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "manual\n"
+
+        unknown = await client.post(
+            "/api/rewind/diff", json={"last_user": True, "path": "other.txt"}
+        )
+        assert unknown.status_code == 400
+        missing = await client.post(
+            "/api/rewind/diff", json={"last_user": True, "path": ""}
+        )
+        assert missing.status_code == 400
+
+
+async def test_shell_only_rewind_needs_no_confirmation(
     client_factory, tmp_path: Path
 ) -> None:
     client, _, _ = await client_factory(
@@ -749,14 +784,89 @@ async def test_shell_only_rewind_requires_acknowledgement(
         assert preview["shell_ran"] is True
         assert preview["files"] == []
 
-        blocked = await client.post("/api/rewind", json={"last_user": True})
-        assert blocked.status_code == 409
-
-        kept = await client.post(
-            "/api/rewind", json={"last_user": True, "files": "keep"}
-        )
-        assert kept.status_code == 200
+        rewound = await client.post("/api/rewind", json={"last_user": True})
+        assert rewound.status_code == 200
+        assert [m["role"] for m in rewound.json()["messages"]] == ["user"]
         assert (tmp_path / "shell.txt").exists()
+
+
+async def test_rewind_can_restore_code_only(client_factory, tmp_path: Path) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "write a note"})
+        before = (await client.get("/api/bootstrap")).json()["messages"]
+
+        response = await client.post(
+            "/api/rewind",
+            json={"last_user": True, "files": "restore", "conversation": "keep"},
+        )
+        assert response.status_code == 200
+        assert response.json()["rewind"]["restore"]["restored"] == ["note.txt"]
+        assert not (tmp_path / "note.txt").exists()
+        assert response.json()["messages"] == before
+
+        again = await client.post(
+            "/api/rewind",
+            json={"last_user": True, "files": "restore", "conversation": "keep"},
+        )
+        assert again.status_code == 400
+
+
+async def test_rewind_conversation_only_from_any_message(
+    client_factory, tmp_path: Path
+) -> None:
+    client, _, _ = await client_factory(
+        [
+            [tool_response([("t1", "Write", {"path": "note.txt", "content": "one"})])],
+            [text_response("done")],
+        ],
+        tools=[WriteTool()],
+    )
+    async with client:
+        await client.post("/api/chat", json={"text": "write a note"})
+        user_id = (await client.get("/api/bootstrap")).json()["messages"][0]["id"]
+
+        response = await client.post(
+            "/api/rewind",
+            json={
+                "message_id": user_id,
+                "files": "keep",
+                "conversation": "rewind",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["messages"] == []
+        assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "one"
+
+
+async def test_rewind_rejects_unknown_choices(client_factory) -> None:
+    client, _, _ = await client_factory([[text_response("ok")]])
+    async with client:
+        await client.post("/api/chat", json={"text": "hi"})
+        files = await client.post(
+            "/api/rewind", json={"last_user": True, "files": "maybe"}
+        )
+        assert files.status_code == 400
+        conversation = await client.post(
+            "/api/rewind",
+            json={"last_user": True, "files": "keep", "conversation": "summarize"},
+        )
+        assert conversation.status_code == 400
+        nothing = await client.post(
+            "/api/rewind", json={"last_user": True, "conversation": "keep"}
+        )
+        assert nothing.status_code == 400
+        no_files = await client.post(
+            "/api/rewind",
+            json={"last_user": True, "files": "restore", "conversation": "keep"},
+        )
+        assert no_files.status_code == 400
 
 
 async def test_continue_keeps_the_earlier_checkpoint(client_factory, tmp_path: Path) -> None:
