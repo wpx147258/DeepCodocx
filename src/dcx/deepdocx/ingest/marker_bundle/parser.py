@@ -165,7 +165,7 @@ def _crop(
     page_width: float,
     page_height: float,
 ) -> None:
-    from PIL import Image  # type: ignore[import-not-found]
+    from PIL import Image
 
     image = Image.open(page_image).convert("RGB")
     width, height = image.size
