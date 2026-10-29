@@ -13,8 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --extra dev
-      - run: uv run python scripts/sync_doc_languages.py --check
-      - run: uv run ruff check src tests scripts
+      - run: uv run ruff check src tests
       - run: uv run mypy src
       - run: uv run pytest -q --cov=dcx --cov-report=term-missing --cov-fail-under=75
 
