@@ -1,5 +1,7 @@
 # 开发指南
 
+**简体中文** | [English](development.en.md) · [首页](../README.md)
+
 ## 环境与检查
 
 ```bash

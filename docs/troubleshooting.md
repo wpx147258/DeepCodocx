@@ -1,5 +1,7 @@
 # 常见问题
 
+**简体中文** | [English](troubleshooting.en.md) · [首页](../README.md)
+
 ## WSL 提示没有图形浏览器
 
 使用 `--no-open`，在 Windows 浏览器手动打开终端显示的地址：

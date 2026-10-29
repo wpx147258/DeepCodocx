@@ -1,5 +1,7 @@
 # DeepCodocx
 
+**简体中文** | [English](README.en.md)
+
 **代码、论文与图表，一个 Agent 工作区。**
 
 [![CI](https://github.com/wpx147258/DeepCodocx/actions/workflows/ci.yml/badge.svg)](https://github.com/wpx147258/DeepCodocx/actions/workflows/ci.yml)

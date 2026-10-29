@@ -1,5 +1,7 @@
 # 配置指南
 
+**简体中文** | [English](configuration.en.md) · [首页](../README.md)
+
 默认读取 `$XDG_CONFIG_HOME/cli-agent/config.toml`，通常是
 `~/.config/cli-agent/config.toml`。也可用 `--config /path/to/config.toml` 指定文件。
 完整示例见 [config.example.toml](../config.example.toml)。

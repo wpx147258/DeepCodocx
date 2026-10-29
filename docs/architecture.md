@@ -1,5 +1,7 @@
 # 架构说明
 
+**简体中文** | [English](architecture.en.md) · [首页](../README.md)
+
 DeepCodocx 以一个 `AgentRuntime` 管理消息、模型和用量。CLI、Web 和一次性执行只负责
 输入与展示；具体 provider、工具、存储和上下文组件由 `assembly.py` 装配。
 

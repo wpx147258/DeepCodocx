@@ -1,5 +1,7 @@
 # CLI 与 Web 使用指南
 
+**简体中文** | [English](usage.en.md) · [首页](../README.md)
+
 ## 三个入口
 
 ```bash

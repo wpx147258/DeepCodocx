@@ -1,5 +1,7 @@
 # DeepDocx 文档工作区
 
+**简体中文** | [English](deepdocx.en.md) · [首页](../README.md)
+
 ## 启动
 
 在 DeepCodocx 中使用现有 provider 配置：
@@ -67,6 +69,9 @@ default_library = "/path/to/deep-docs-unified/data"
 
 ```json
 {"name":"DiscoverTools","input":{"query":"document paper search read view guide","limit":5}}
+```
+
+```json
 {"name":"CallExternalTool","input":{"tool":"documents.doc_search","arguments":{"query":"memory","top_k":5}}}
 ```
 
