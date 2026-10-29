@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli_agent.assembly import _make_completer
-from cli_agent.providers.base import ModelProfile
-from cli_agent.runtime import ProviderSlot
+from dcx.assembly import _make_completer
+from dcx.providers.base import ModelProfile
+from dcx.runtime import ProviderSlot
 from tests.support.fake_provider import FakeProvider, text_response
 from tests.support.runtime_fixture import make_runtime
 

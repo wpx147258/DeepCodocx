@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from cli_agent.cli.render import JsonRenderer
-from cli_agent.events import (
+from dcx.cli.render import JsonRenderer
+from dcx.events import (
     AgentContextEvent,
     AgentError,
     AgentNotice,
@@ -13,7 +13,7 @@ from cli_agent.events import (
     AgentTurnFinished,
     AgentUsage,
 )
-from cli_agent.messages import TextBlock, Usage
+from dcx.messages import TextBlock, Usage
 
 
 def _renderer(*, stream: bool, show_reasoning: bool = False) -> JsonRenderer:

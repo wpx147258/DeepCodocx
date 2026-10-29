@@ -5,10 +5,10 @@ import logging
 import anthropic
 import httpx2
 
-from cli_agent.assembly import _complete_request
-from cli_agent.messages import user_message
-from cli_agent.providers.anthropic_compat import AnthropicCompatProvider
-from cli_agent.providers.base import ModelProfile, ModelRequest, ProviderError
+from dcx.assembly import _complete_request
+from dcx.messages import user_message
+from dcx.providers.anthropic_compat import AnthropicCompatProvider
+from dcx.providers.base import ModelProfile, ModelRequest, ProviderError
 from tests.support.fake_provider import FakeProvider, fail, text_response
 
 

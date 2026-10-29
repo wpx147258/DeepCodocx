@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from cli_agent.context.tokens import TokenEstimator
-from cli_agent.events import (
+from dcx.context.tokens import TokenEstimator
+from dcx.events import (
     AgentError,
     AgentNotice,
     AgentRetry,
@@ -16,10 +16,10 @@ from cli_agent.events import (
     AgentToolFinished,
     AgentTurnFinished,
 )
-from cli_agent.messages import ImageBlock, Usage
-from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
-from cli_agent.providers.base import TextDelta
-from cli_agent.tools.base import ToolContext, ToolResult, ToolSpec
+from dcx.messages import ImageBlock, Usage
+from dcx.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
+from dcx.providers.base import TextDelta
+from dcx.tools.base import ToolContext, ToolResult, ToolSpec
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 from tests.support.runtime_fixture import EchoTool, ShellTool, make_runtime
 
@@ -267,7 +267,7 @@ async def test_high_risk_shell_command_is_blocked_without_an_asker(tmp_path: Pat
 
 
 async def test_request_carries_thinking_config(tmp_path: Path) -> None:
-    from cli_agent.providers.base import ThinkingConfig
+    from dcx.providers.base import ThinkingConfig
 
     provider = FakeProvider([[text_response("ok")]])
     runtime, _ = make_runtime(
@@ -452,7 +452,7 @@ async def test_context_tokens_track_the_current_view(tmp_path: Path) -> None:
 async def test_memory_rides_on_the_user_message_not_the_system_prompt(
     tmp_path: Path,
 ) -> None:
-    from cli_agent.context.memory import MemoryRecord, MemoryStore
+    from dcx.context.memory import MemoryRecord, MemoryStore
 
     store = MemoryStore(tmp_path / "memory")
     store.save(MemoryRecord("prefers-tabs", "indent", "user", "Use tabs."))
@@ -474,7 +474,7 @@ async def test_memory_rides_on_the_user_message_not_the_system_prompt(
 
 
 async def test_memory_note_is_absent_without_records(tmp_path: Path) -> None:
-    from cli_agent.context.memory import MemoryStore
+    from dcx.context.memory import MemoryStore
 
     provider = FakeProvider([[text_response("ok")]])
     runtime, _ = make_runtime(
@@ -487,8 +487,8 @@ async def test_memory_note_is_absent_without_records(tmp_path: Path) -> None:
 
 
 async def test_saving_memory_leaves_the_system_prompt_unchanged(tmp_path: Path) -> None:
-    from cli_agent.context.memory import MemoryStore
-    from cli_agent.tools.builtin.memory import RememberTool
+    from dcx.context.memory import MemoryStore
+    from dcx.tools.builtin.memory import RememberTool
 
     store = MemoryStore(tmp_path / "memory")
     provider = FakeProvider(
@@ -536,7 +536,7 @@ async def test_saving_memory_leaves_the_system_prompt_unchanged(tmp_path: Path) 
 def _request_signature(messages):
     import json
 
-    from cli_agent.messages import TextBlock, ToolResultBlock, ToolUseBlock
+    from dcx.messages import TextBlock, ToolResultBlock, ToolUseBlock
 
     signature = []
     for message in messages:
@@ -720,7 +720,7 @@ async def test_context_tokens_estimates_before_the_first_request(
 
 
 async def test_write_tool_creates_a_restorable_checkpoint(tmp_path: Path) -> None:
-    from cli_agent.tools.builtin.files import WriteTool
+    from dcx.tools.builtin.files import WriteTool
 
     provider = FakeProvider(
         [
@@ -744,7 +744,7 @@ async def test_write_tool_creates_a_restorable_checkpoint(tmp_path: Path) -> Non
 
 
 async def test_restore_can_keep_the_conversation(tmp_path: Path) -> None:
-    from cli_agent.tools.builtin.files import WriteTool
+    from dcx.tools.builtin.files import WriteTool
 
     provider = FakeProvider(
         [
@@ -766,7 +766,7 @@ async def test_restore_can_keep_the_conversation(tmp_path: Path) -> None:
 
 
 async def test_bad_checkpoint_path_does_not_break_the_turn(tmp_path: Path) -> None:
-    from cli_agent.tools.builtin.files import WriteTool
+    from dcx.tools.builtin.files import WriteTool
 
     provider = FakeProvider(
         [
@@ -787,7 +787,7 @@ async def test_bad_checkpoint_path_does_not_break_the_turn(tmp_path: Path) -> No
 
 
 async def test_continuing_same_turn_keeps_earlier_checkpoint(tmp_path: Path) -> None:
-    from cli_agent.tools.builtin.files import WriteTool
+    from dcx.tools.builtin.files import WriteTool
 
     provider = FakeProvider(
         [
@@ -807,7 +807,7 @@ async def test_continuing_same_turn_keeps_earlier_checkpoint(tmp_path: Path) -> 
 
 
 async def test_edit_rewind_discards_orphan_checkpoints(tmp_path: Path) -> None:
-    from cli_agent.tools.builtin.files import WriteTool
+    from dcx.tools.builtin.files import WriteTool
 
     provider = FakeProvider(
         [

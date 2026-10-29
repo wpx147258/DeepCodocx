@@ -2,13 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            // Interactive REPL: entry point is cli_agent/entry.py:main, reached
+            // Interactive REPL: entry point is dcx/entry.py:main, reached
             // through the click command installed as the `cli-agent` script.
             "name": "cli-agent REPL",
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
-            "module": "cli_agent",
+            "module": "dcx",
             "args": [],
             "cwd": "${workspaceFolder}",
             // input() needs a real terminal, so the internal console will not work.
@@ -24,8 +24,8 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
-            "module": "cli_agent",
-            "args": ["-p", "reply with the word pong"],
+            "module": "dcx",
+            "args": ["run", "reply with the word pong"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": true,

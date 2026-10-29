@@ -6,23 +6,23 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from cli_agent.context.memory import MemoryStore
-from cli_agent.context.pipeline import ContextPipeline
-from cli_agent.context.prompts import PromptBuilder
-from cli_agent.context.skills import SkillLoader
-from cli_agent.context.spill import SpillStore
-from cli_agent.context.tokens import TokenEstimator
-from cli_agent.messages import Usage
-from cli_agent.permissions.policy import Asker, PermissionMode, PermissionPolicy
-from cli_agent.providers.base import ModelProfile, ThinkingConfig
-from cli_agent.runtime import AgentRuntime, RuntimeDeps
-from cli_agent.session.checkpoints import CheckpointStore
-from cli_agent.session.paths import SessionPaths
-from cli_agent.session.store import SessionStore
-from cli_agent.tools.base import Tool, ToolContext, ToolResult, ToolSpec
-from cli_agent.tools.execution import ToolExecutor
-from cli_agent.tools.registry import ToolRegistry
-from cli_agent.transcript import Transcript
+from dcx.context.memory import MemoryStore
+from dcx.context.pipeline import ContextPipeline
+from dcx.context.prompts import PromptBuilder
+from dcx.context.skills import SkillLoader
+from dcx.context.spill import SpillStore
+from dcx.context.tokens import TokenEstimator
+from dcx.messages import Usage
+from dcx.permissions.policy import Asker, PermissionMode, PermissionPolicy
+from dcx.providers.base import ModelProfile, ThinkingConfig
+from dcx.runtime import AgentRuntime, RuntimeDeps
+from dcx.session.checkpoints import CheckpointStore
+from dcx.session.paths import SessionPaths
+from dcx.session.store import SessionStore
+from dcx.tools.base import Tool, ToolContext, ToolResult, ToolSpec
+from dcx.tools.execution import ToolExecutor
+from dcx.tools.registry import ToolRegistry
+from dcx.transcript import Transcript
 
 
 class EchoTool:

@@ -15,7 +15,7 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run ruff check src tests
       - run: uv run mypy src
-      - run: uv run pytest -q --cov=cli_agent --cov-report=term-missing --cov-fail-under=75
+      - run: uv run pytest -q --cov=dcx --cov-report=term-missing --cov-fail-under=75
 
   live:
     if: github.event_name == 'workflow_dispatch'

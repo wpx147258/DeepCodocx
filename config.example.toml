@@ -27,3 +27,22 @@ budget_tokens = 100000  # must be below max_output_tokens
 # The agent writes memory itself through the Remember tool; there is no
 # background extraction loop.
 enabled = true
+
+# Optional document libraries shown in the DeepDocx selector. Either data/ or
+# paper-bundles/ is accepted. The directory is on the server, not the browser.
+[deepdocx]
+libraries = []
+# libraries = ["/path/to/deep-docs-unified/data"]
+# Used until the user chooses another library; that choice is saved across restarts.
+# default_library = "/path/to/deep-docs-unified/data"
+# With no saved/configured library, a nearby deep-docs-unified/data is discovered.
+
+# Optional generic MCP stdio server. Commands are local configuration; models
+# cannot choose executable paths. Unknown tools require normal approval.
+# [mcp_servers.notes]
+# command = "python"
+# args = ["/path/to/notes_server.py"]
+# read_tools = ["search", "read"]
+# timeout = 30
+# [mcp_servers.notes.env]
+# NOTES_PATH = "/path/to/notes"

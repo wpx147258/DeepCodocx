@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import cli_agent.atomic as atomic
+import dcx.atomic as atomic
 
 
 def test_append_line_handles_short_writes(tmp_path: Path, monkeypatch) -> None:

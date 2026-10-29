@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli_agent.context.memory import (
+from dcx.context.memory import (
     MemoryRecord,
     MemoryStore,
     inject_memory,
     looks_like_secret,
     memory_note,
 )
-from cli_agent.messages import TextBlock, assistant_message, user_message
-from cli_agent.tools.base import ToolContext
-from cli_agent.tools.builtin.memory import RememberTool
+from dcx.messages import TextBlock, assistant_message, user_message
+from dcx.tools.base import ToolContext
+from dcx.tools.builtin.memory import RememberTool
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -118,7 +118,7 @@ async def test_remember_rejects_unknown_type(tmp_path: Path) -> None:
 
 
 def test_no_background_extraction_surface_remains() -> None:
-    import cli_agent.context.memory as memory_module
+    import dcx.context.memory as memory_module
 
     for removed in (
         "MemoryExtractor",

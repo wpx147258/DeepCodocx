@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.config import (
+from dcx.config import (
     AppPaths,
     load_config,
     resolve_api_key,
     resolve_base_url,
 )
-from cli_agent.errors import ConfigError
-from cli_agent.providers.factory import build_profile
+from dcx.errors import ConfigError
+from dcx.providers.factory import build_profile
 
 
 def _env(tmp_path: Path) -> dict[str, str]:

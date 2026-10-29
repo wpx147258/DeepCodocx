@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.assembly import BuildOptions, build_runtime
-from cli_agent.errors import ConfigError
-from cli_agent.providers.base import ThinkingConfig
+from dcx.assembly import BuildOptions, build_runtime
+from dcx.errors import ConfigError
+from dcx.providers.base import ThinkingConfig
 
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:

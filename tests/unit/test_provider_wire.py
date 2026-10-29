@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cli_agent.messages import (
+from dcx.messages import (
     ImageBlock,
     Message,
     ReasoningBlock,
@@ -15,14 +15,14 @@ from cli_agent.messages import (
     assistant_message,
     now_iso,
 )
-from cli_agent.providers.anthropic_compat import (
+from dcx.providers.anthropic_compat import (
     AnthropicCompatProvider,
     _final_blocks,
     _final_usage,
     _messages_to_wire,
     _stop_reason,
 )
-from cli_agent.providers.base import (
+from dcx.providers.base import (
     ModelProfile,
     ModelRequest,
     ReasoningDelta,
@@ -32,7 +32,7 @@ from cli_agent.providers.base import (
     ThinkingConfig,
     ToolCall,
 )
-from cli_agent.tools.base import ToolSpec
+from dcx.tools.base import ToolSpec
 
 
 def _profile(**overrides) -> ModelProfile:

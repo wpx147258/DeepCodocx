@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-import cli_agent.assembly as assembly
-from cli_agent.assembly import BuildOptions, build_runtime
-from cli_agent.events import AgentContextEvent
-from cli_agent.providers.base import ModelProfile
+import dcx.assembly as assembly
+from dcx.assembly import BuildOptions, build_runtime
+from dcx.events import AgentContextEvent
+from dcx.providers.base import ModelProfile
 from tests.support.fake_provider import FakeProvider, text_response
 
 

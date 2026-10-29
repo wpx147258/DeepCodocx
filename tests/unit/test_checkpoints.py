@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.session.checkpoints import CheckpointStore
-from cli_agent.session.paths import SessionPaths
+from dcx.session.checkpoints import CheckpointStore
+from dcx.session.paths import SessionPaths
 
 
 def _paths(tmp_path: Path) -> SessionPaths:

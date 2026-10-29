@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from cli_agent.context.tokens import TokenEstimator, prompt_tokens
-from cli_agent.messages import user_message
-from cli_agent.providers.base import SystemSection
-from cli_agent.tools.base import ToolSpec
+from dcx.context.tokens import TokenEstimator, prompt_tokens
+from dcx.messages import user_message
+from dcx.providers.base import SystemSection
+from dcx.tools.base import ToolSpec
 
 _TOOL = ToolSpec(
     name="Bash",
@@ -48,7 +48,7 @@ def test_calibration_ignores_empty_inputs() -> None:
 
 
 def test_prompt_tokens_includes_cached_prefix() -> None:
-    from cli_agent.messages import Usage
+    from dcx.messages import Usage
 
     usage = Usage(
         input_tokens=331,

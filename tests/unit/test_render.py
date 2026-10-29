@@ -4,9 +4,9 @@ from io import StringIO
 
 from rich.console import Console
 
-from cli_agent.cli.render import PrintRenderer, Renderer
-from cli_agent.events import AgentRetry, AgentTextDelta, AgentTurnFinished
-from cli_agent.messages import Usage
+from dcx.cli.render import PrintRenderer, Renderer
+from dcx.events import AgentRetry, AgentTextDelta, AgentTurnFinished
+from dcx.messages import Usage
 
 
 def _console() -> tuple[Console, StringIO]:
@@ -113,7 +113,7 @@ def test_print_marks_failed_stop_reasons(capsys) -> None:
 
 
 def test_history_renders_the_resumed_conversation() -> None:
-    from cli_agent.messages import TextBlock, ToolUseBlock, assistant_message, user_message
+    from dcx.messages import TextBlock, ToolUseBlock, assistant_message, user_message
 
     messages = (
         user_message("earlier question"),
@@ -137,8 +137,8 @@ def test_history_renders_the_resumed_conversation() -> None:
 
 
 def test_turn_summary_shows_turn_and_session_cost() -> None:
-    from cli_agent.events import AgentUsage
-    from cli_agent.messages import Usage
+    from dcx.events import AgentUsage
+    from dcx.messages import Usage
 
     console, output = _console()
     renderer = Renderer(console=console)

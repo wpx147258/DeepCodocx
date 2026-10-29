@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner
 
-from cli_agent.entry import main
-from cli_agent.events import (
+from dcx.entry import main
+from dcx.events import (
     AgentError,
     AgentTextDelta,
     AgentToolFinished,
@@ -16,7 +16,7 @@ from cli_agent.events import (
     AgentTurnFinished,
     AgentUsage,
 )
-from cli_agent.messages import TextBlock, Usage
+from dcx.messages import TextBlock, Usage
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -83,7 +83,7 @@ def test_one_shot_wiring(tmp_path: Path, monkeypatch) -> None:
         session_id="s",
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
     assert result.exit_code == 0
     assert "hello" in result.output
@@ -103,7 +103,7 @@ def test_one_shot_error_exit_code(tmp_path: Path, monkeypatch) -> None:
         session_id="s",
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
     assert result.exit_code == 2
 
@@ -123,7 +123,7 @@ def test_print_mode_refusal_exit_code(tmp_path: Path, monkeypatch) -> None:
         session_id="s",
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
     assert result.exit_code == 2
     combined = result.output + (getattr(result, "stderr", "") or "")
@@ -151,7 +151,7 @@ def test_thinking_flags_reach_build_options(tmp_path: Path, monkeypatch) -> None
         captured["options"] = options
         return bundle
 
-    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    monkeypatch.setattr("dcx.entry.build_runtime", fake_build)
     result = CliRunner().invoke(
         main,
         ["run", "--extended-thinking", "--thinking-budget", "2048", "hi"],
@@ -177,7 +177,7 @@ def test_thinking_display_without_request_warns(tmp_path: Path, monkeypatch) -> 
         session_id="s",
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(
         main, ["run", "--thinking", "hi"], env=_env(tmp_path)
     )
@@ -205,7 +205,7 @@ def test_output_format_jsonl(tmp_path: Path, monkeypatch) -> None:
         resumed=False,
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(
         main, ["run", "--output-format", "jsonl", "hi"], env=_env(tmp_path)
     )
@@ -239,7 +239,7 @@ def test_output_format_json_single_object(tmp_path: Path, monkeypatch) -> None:
         resumed=False,
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(
         main, ["run", "--output-format", "json", "hi"], env=_env(tmp_path)
     )
@@ -272,7 +272,7 @@ def test_json_error_event_exits_two(tmp_path: Path, monkeypatch) -> None:
         resumed=False,
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(
         main, ["run", "--output-format", "jsonl", "hi"], env=_env(tmp_path)
     )
@@ -298,7 +298,7 @@ def test_unexpected_exception_goes_to_stderr(tmp_path: Path, monkeypatch) -> Non
         resumed=False,
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
     assert result.exit_code == 2
     assert result.stdout.strip() == ""
@@ -320,7 +320,7 @@ def test_incomplete_turn_exits_two(tmp_path: Path, monkeypatch) -> None:
         resumed=False,
         degraded=False,
     )
-    monkeypatch.setattr("cli_agent.entry.build_runtime", lambda options: bundle)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: bundle)
     result = CliRunner().invoke(main, ["run", "hi"], env=_env(tmp_path))
     assert result.exit_code == 2
 
@@ -347,7 +347,7 @@ def test_global_options_apply_to_run(tmp_path: Path, monkeypatch) -> None:
         captured["options"] = options
         return bundle
 
-    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    monkeypatch.setattr("dcx.entry.build_runtime", fake_build)
     result = CliRunner().invoke(
         main, ["--provider", "deepseek", "run", "hi"], env=_env(tmp_path)
     )
@@ -387,7 +387,7 @@ def test_fork_flag_reaches_build_options(tmp_path: Path, monkeypatch) -> None:
         captured["options"] = options
         return bundle
 
-    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    monkeypatch.setattr("dcx.entry.build_runtime", fake_build)
     result = CliRunner().invoke(
         main, ["run", "-c", "--fork", "hi"], env=_env(tmp_path)
     )
@@ -429,7 +429,7 @@ def test_max_turns_normal_values_pass(
         captured["options"] = options
         return bundle
 
-    monkeypatch.setattr("cli_agent.entry.build_runtime", fake_build)
+    monkeypatch.setattr("dcx.entry.build_runtime", fake_build)
     result = CliRunner().invoke(main, args, env=_env(tmp_path))
     assert result.exit_code == 0
     assert captured["options"].max_turns == expected

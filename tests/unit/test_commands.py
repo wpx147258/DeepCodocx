@@ -5,10 +5,10 @@ from pathlib import Path
 
 from rich.console import Console
 
-from cli_agent.cli.commands import CommandDispatcher
-from cli_agent.cli.render import Renderer
-from cli_agent.messages import Usage
-from cli_agent.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
+from dcx.cli.commands import CommandDispatcher
+from dcx.cli.render import Renderer
+from dcx.messages import Usage
+from dcx.permissions.policy import NullAsker, PermissionMode, PermissionPolicy
 from tests.support.fake_provider import FakeProvider, text_response, tool_response
 from tests.support.runtime_fixture import ShellTool, make_runtime
 
@@ -138,7 +138,7 @@ async def test_compact_warns_about_the_prefix_rewrite(tmp_path: Path) -> None:
 
 
 async def test_memory_command_lists_and_forgets(tmp_path: Path) -> None:
-    from cli_agent.context.memory import MemoryRecord, MemoryStore
+    from dcx.context.memory import MemoryRecord, MemoryStore
 
     store = MemoryStore(tmp_path / "memory")
     store.save(MemoryRecord("prefers-tabs", "indent preference", "user", "Use tabs."))

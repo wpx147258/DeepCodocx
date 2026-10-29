@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cli-agent"
 version = "0.1.0"
-description = "A small, provider-neutral CLI coding agent."
+description = "A coding and document agent with local evidence, visual reading, and discoverable MCP tools."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -30,10 +30,10 @@ dev = [
 ]
 
 [project.scripts]
-cli-agent = "cli_agent.entry:main"
+cli-agent = "dcx.entry:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cli_agent"]
+packages = ["src/dcx"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -50,7 +50,7 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
-packages = ["cli_agent"]
+packages = ["dcx"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true

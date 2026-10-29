@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterable, Mapping
 from typing import Any
 
-from cli_agent.messages import (
+from dcx.messages import (
     Message,
     StopReason,
     TextBlock,
@@ -13,7 +13,7 @@ from cli_agent.messages import (
     Usage,
     assistant_message,
 )
-from cli_agent.providers.base import (
+from dcx.providers.base import (
     ModelRequest,
     ProviderError,
     ProviderEvent,

@@ -1,11 +1,11 @@
-# cli-agent development notes
+# DeepCodocx development notes
 
 ## Architecture
 
-- `src/cli_agent/runtime.py` contains the only agent loop. Do not add a second loop.
-- `src/cli_agent/assembly.py` is the only place that constructs concrete providers,
+- `src/dcx/runtime.py` contains the only agent loop. Do not add a second loop.
+- `src/dcx/assembly.py` is the only place that constructs concrete providers,
   tools, stores, and pipelines. Other modules depend on protocols.
-- System-prompt sections live in `src/cli_agent/context/prompts/`. Each module must
+- System-prompt sections live in `src/dcx/context/prompts/`. Each module must
   claim only capabilities the harness actually has; the tool list is generated from
   the live `ToolSpec` registry.
 - Internal messages are provider-neutral (`messages.py`). Vendor wire formats belong in
@@ -53,7 +53,7 @@
 - Headless JSON output is a public surface: stdout carries data only, diagnostics
   go to stderr, and every completed turn ends with a `result` object. Keep event
   and field names stable; use `stop_reason`/`is_complete` for completion.
-- The web host (`src/cli_agent/web/`) is another adapter, not a second agent. It may
+- The web host (`src/dcx/web/`) is another adapter, not a second agent. It may
   read runtime state and drive one turn at a time, but never appends messages, edits
   usage, or bypasses permission policy. Browser permission prompts fail closed when
   the client disappears or times out. Session switching closes the old runtime and

@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.config import AppPaths
-from cli_agent.errors import SessionError
-from cli_agent.messages import Usage, user_message
-from cli_agent.session.fork import fork_session
-from cli_agent.session.lock import FileLock
-from cli_agent.session.store import SessionStore
+from dcx.config import AppPaths
+from dcx.errors import SessionError
+from dcx.messages import Usage, user_message
+from dcx.session.fork import fork_session
+from dcx.session.lock import FileLock
+from dcx.session.store import SessionStore
 
 
 def _paths(tmp_path: Path) -> AppPaths:

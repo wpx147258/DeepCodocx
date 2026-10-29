@@ -7,18 +7,18 @@ from pathlib import Path
 import httpx
 import pytest
 
-from cli_agent.assembly import RuntimeBundle
-from cli_agent.config import AppPaths, load_config
-from cli_agent.messages import TextBlock, assistant_message, user_message
-from cli_agent.permissions.policy import PermissionRequest
-from cli_agent.providers.base import ModelProfile
-from cli_agent.session.meta import read_session_meta, update_session_meta
-from cli_agent.session.paths import SessionPaths
-from cli_agent.session.store import SessionStore
-from cli_agent.tools.builtin.bash import BashTool
-from cli_agent.tools.builtin.files import WriteTool
-from cli_agent.web import server as web_server
-from cli_agent.web.server import (
+from dcx.assembly import RuntimeBundle
+from dcx.config import AppPaths, load_config
+from dcx.messages import TextBlock, assistant_message, user_message
+from dcx.permissions.policy import PermissionRequest
+from dcx.providers.base import ModelProfile
+from dcx.session.meta import read_session_meta, update_session_meta
+from dcx.session.paths import SessionPaths
+from dcx.session.store import SessionStore
+from dcx.tools.builtin.bash import BashTool
+from dcx.tools.builtin.files import WriteTool
+from dcx.web import server as web_server
+from dcx.web.server import (
     STATIC_DIR,
     TurnBusy,
     WebAsker,
@@ -167,7 +167,7 @@ async def test_tool_events_reach_the_browser(client_factory) -> None:
 
 
 async def test_clear_and_auto_endpoints(client_factory) -> None:
-    from cli_agent.permissions.policy import PermissionMode, PermissionPolicy
+    from dcx.permissions.policy import PermissionMode, PermissionPolicy
 
     client, bundle, _ = await client_factory(
         [[text_response("hello")]],
@@ -633,7 +633,7 @@ async def test_sessions_search_endpoint(client_factory, tmp_path: Path) -> None:
 
 
 def test_image_only_session_gets_a_title(tmp_path: Path) -> None:
-    from cli_agent.messages import ImageBlock, user_message
+    from dcx.messages import ImageBlock, user_message
 
     paths = AppPaths.discover(tmp_path, env=_env(tmp_path))
     store = SessionStore.new(

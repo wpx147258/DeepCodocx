@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cli_agent.messages import (
+from dcx.messages import (
     Message,
     TextBlock,
     ToolResultBlock,
@@ -9,7 +9,7 @@ from cli_agent.messages import (
     now_iso,
     user_message,
 )
-from cli_agent.transcript import MISSING_TOOL_RESULT, Transcript
+from dcx.transcript import MISSING_TOOL_RESULT, Transcript
 
 
 def test_orphan_tool_use_at_tail_gets_synthetic_result() -> None:

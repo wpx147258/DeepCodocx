@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cli_agent.permissions.danger import classify
+from dcx.permissions.danger import classify
 
 DANGEROUS = [
     "rm -rf /",

@@ -12,3 +12,9 @@ build/
 config.toml
 .coverage
 htmlcov/
+
+# Local planning, learning, and review material stays outside release commits.
+/docs/plan/
+/docs/learn/
+/docs/revision/
+/docs/local/

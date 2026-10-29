@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from cli_agent.tools.builtin.bash import _BoundedOutput, _kill_tree
+from dcx.tools.builtin.bash import _BoundedOutput, _kill_tree
 
 
 def test_bounded_output_under_limit() -> None:

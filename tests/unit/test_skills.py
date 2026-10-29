@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.context.skills import (
+from dcx.context.skills import (
     MAX_SKILL_BODY_BYTES,
     MAX_SKILL_DESCRIPTION_CHARS,
     MAX_SKILL_FILE_BYTES,
@@ -13,7 +13,7 @@ from cli_agent.context.skills import (
     SkillLoader,
     _read_skill_text,
 )
-from cli_agent.tools.builtin.skills import LoadSkillTool
+from dcx.tools.builtin.skills import LoadSkillTool
 
 
 def _skill(root: Path, name: str, description: str, body: str) -> None:

@@ -3,11 +3,11 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from cli_agent.messages import ImageBlock
-from cli_agent.tools.base import ToolContext
-from cli_agent.tools.builtin.bash import BashTool
-from cli_agent.tools.builtin.files import EditTool, ReadTool, WriteTool
-from cli_agent.tools.builtin.search import GlobTool, GrepTool, _rebase_line
+from dcx.messages import ImageBlock
+from dcx.tools.base import ToolContext
+from dcx.tools.builtin.bash import BashTool
+from dcx.tools.builtin.files import EditTool, ReadTool, WriteTool
+from dcx.tools.builtin.search import GlobTool, GrepTool, _rebase_line
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -137,9 +137,9 @@ async def test_read_returns_an_image_block(tmp_path: Path) -> None:
 
 
 def test_remember_is_registered_only_with_a_memory_store(tmp_path: Path) -> None:
-    from cli_agent.context.memory import MemoryStore
-    from cli_agent.context.skills import SkillLoader
-    from cli_agent.tools.builtin import build_builtin_registry
+    from dcx.context.memory import MemoryStore
+    from dcx.context.skills import SkillLoader
+    from dcx.tools.builtin import build_builtin_registry
 
     plain = build_builtin_registry(SkillLoader([]))
     assert plain.get("Remember") is None
@@ -154,12 +154,12 @@ def test_remember_is_registered_only_with_a_memory_store(tmp_path: Path) -> None
 
 
 async def test_large_tool_output_is_spilled_at_creation(tmp_path: Path) -> None:
-    from cli_agent.context.spill import SPILL_THRESHOLD_CHARS, SpillStore
-    from cli_agent.messages import ToolUseBlock
-    from cli_agent.permissions.policy import PermissionMode, PermissionPolicy
-    from cli_agent.tools.base import ToolResult, ToolSpec
-    from cli_agent.tools.execution import ToolExecutor
-    from cli_agent.tools.registry import ToolRegistry
+    from dcx.context.spill import SPILL_THRESHOLD_CHARS, SpillStore
+    from dcx.messages import ToolUseBlock
+    from dcx.permissions.policy import PermissionMode, PermissionPolicy
+    from dcx.tools.base import ToolResult, ToolSpec
+    from dcx.tools.execution import ToolExecutor
+    from dcx.tools.registry import ToolRegistry
 
     class SizedTool:
         spec = ToolSpec(

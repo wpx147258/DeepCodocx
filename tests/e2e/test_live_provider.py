@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent.assembly import BuildOptions, build_runtime
-from cli_agent.events import AgentTextDelta, AgentToolFinished
+from dcx.assembly import BuildOptions, build_runtime
+from dcx.events import AgentTextDelta, AgentToolFinished
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("CLI_AGENT_E2E_PROVIDER"),

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from cli_agent.errors import ProviderFailure
-from cli_agent.events import AgentTextDelta, AgentToolStarted
-from cli_agent.messages import Usage
-from cli_agent.providers.base import ModelProfile, ModelRequest, ReasoningDelta, TextDelta, ToolCall
-from cli_agent.runtime_attempt import Attempt, stream_attempt
+from dcx.errors import ProviderFailure
+from dcx.events import AgentTextDelta, AgentToolStarted
+from dcx.messages import Usage
+from dcx.providers.base import ModelProfile, ModelRequest, ReasoningDelta, TextDelta, ToolCall
+from dcx.runtime_attempt import Attempt, stream_attempt
 from tests.support.fake_provider import FakeProvider, fail, text_response, tool_response
 
 

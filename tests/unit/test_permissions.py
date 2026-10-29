@@ -5,16 +5,16 @@ from typing import Any
 
 import pytest
 
-from cli_agent.errors import ConfigError
-from cli_agent.permissions.controller import PermissionController
-from cli_agent.permissions.policy import (
+from dcx.errors import ConfigError
+from dcx.permissions.controller import PermissionController
+from dcx.permissions.policy import (
     NullAsker,
     PermissionMode,
     PermissionPolicy,
     PermissionRequest,
 )
-from cli_agent.permissions.rules import PermissionRule, PermissionRules
-from cli_agent.tools.base import ToolSpec
+from dcx.permissions.rules import PermissionRule, PermissionRules
+from dcx.tools.base import ToolSpec
 
 READ = ToolSpec("Read", "read", {"type": "object"}, category="read", path_arg="path")
 WRITE = ToolSpec("Write", "write", {"type": "object"}, category="write", path_arg="path")

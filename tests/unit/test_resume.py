@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from cli_agent import assembly
-from cli_agent.assembly import BuildOptions, RuntimeBundle, build_runtime
-from cli_agent.config import AppPaths
-from cli_agent.errors import ConfigError
-from cli_agent.providers.base import ModelProfile
-from cli_agent.session.store import SessionStore
+from dcx import assembly
+from dcx.assembly import BuildOptions, RuntimeBundle, build_runtime
+from dcx.config import AppPaths
+from dcx.errors import ConfigError
+from dcx.providers.base import ModelProfile
+from dcx.session.store import SessionStore
 
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:

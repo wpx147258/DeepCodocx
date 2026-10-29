@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from cli_agent.assembly import _complete_request
-from cli_agent.errors import ProviderFailure
-from cli_agent.messages import user_message
-from cli_agent.providers.base import ModelRequest
+from dcx.assembly import _complete_request
+from dcx.errors import ProviderFailure
+from dcx.messages import user_message
+from dcx.providers.base import ModelRequest
 from tests.support.fake_provider import FakeProvider, fail, text_response
 
 

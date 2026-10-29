@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from cli_agent.context.prompts import PromptBuilder, PromptContext, load_project_instructions
-from cli_agent.context.skills import Skill
-from cli_agent.providers.base import ModelProfile
-from cli_agent.tools.base import ToolSpec
+from dcx.context.prompts import PromptBuilder, PromptContext, load_project_instructions
+from dcx.context.skills import Skill
+from dcx.providers.base import ModelProfile
+from dcx.tools.base import ToolSpec
 
 
 def _profile() -> ModelProfile:

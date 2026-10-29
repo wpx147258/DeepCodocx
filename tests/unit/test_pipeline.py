@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli_agent.context.pipeline import ContextPipeline
-from cli_agent.context.tokens import TokenEstimator
-from cli_agent.messages import (
+from dcx.context.pipeline import ContextPipeline
+from dcx.context.tokens import TokenEstimator
+from dcx.messages import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -12,9 +12,9 @@ from cli_agent.messages import (
     tool_result_message,
     user_message,
 )
-from cli_agent.providers.base import ModelProfile
-from cli_agent.session.paths import SessionPaths
-from cli_agent.transcript import Transcript
+from dcx.providers.base import ModelProfile
+from dcx.session.paths import SessionPaths
+from dcx.transcript import Transcript
 
 
 async def _summarize(text: str, max_tokens: int) -> str:
@@ -108,6 +108,17 @@ async def test_short_history_does_not_compact(tmp_path: Path) -> None:
     )
     assert prepared.checkpoint is None
     assert any(event.kind == "compact_skipped" for event in prepared.events)
+
+
+async def test_compaction_never_cuts_between_tool_call_and_result(tmp_path: Path) -> None:
+    messages = [user_message("request " * 30), assistant_message([TextBlock("findings " * 40)]), user_message("continue " * 30)]
+    messages.extend(_tool_pair("paired", "tool output"))
+    messages.extend([assistant_message([TextBlock("findings")]), user_message("next"), assistant_message([TextBlock("answer")])])
+    prepared = await _pipeline(tmp_path / "session").prepare(Transcript(messages), "next", _profile(200_000), force_compact=True)
+    assert prepared.checkpoint is not None
+    calls = {block.id for message in prepared.messages for block in message.tool_uses()}
+    results = {block.tool_use_id for message in prepared.messages for block in message.tool_results()}
+    assert results <= calls
 
 
 async def test_force_compact_works_when_whole_view_fits_window(tmp_path: Path) -> None:
