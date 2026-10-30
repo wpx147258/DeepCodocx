@@ -96,6 +96,7 @@ printf '介绍这个仓库的入口与主要模块' | \
 |---|---|
 | [DeepDocx 文档指南](docs/deepdocx.md) | 文档库、图表阅读、引用、MCP 文档工具 |
 | [CLI 与 Web 使用指南](docs/usage.md) | 会话、权限、回滚、终端命令与脚本输出 |
+| [多模态索引](docs/multimodal-index.md) | Gitee embedding、百炼原生融合、caption、增量同步 |
 | [配置指南](docs/configuration.md) | Provider、思考模式、文档库、外部 MCP |
 | [架构说明](docs/architecture.md) | 单运行时、工具边界、上下文与持久化 |
 | [开发指南](docs/development.md) | 安装开发环境、测试与贡献约定 |
@@ -105,7 +106,8 @@ printf '介绍这个仓库的入口与主要模块' | \
 
 已支持代码工具、持久会话、文档关键词定位、原文与图像读取，以及本地 stdio MCP。
 PDF 上传、Basic / Marker 转换与索引更新作为独立系统任务运行。
-图像与语义向量检索、自动 caption 和远程 MCP 仍在后续范围。
+已支持文本块、图像、图注／生成描述与原生图文联合索引；Gitee 与百炼服务分别编码查询，
+检索返回可回读的证据来源。配置见[多模态索引](docs/multimodal-index.md)。远程 MCP 仍在后续范围。
 
 权限系统用于审批与操作控制，运行不可信任务时应配合外部隔离环境。默认 Web 服务仅绑定
 本机地址；公开监听时要求 API token。配置细节见[使用指南](docs/usage.md)。

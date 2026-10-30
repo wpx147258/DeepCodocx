@@ -1381,3 +1381,39 @@ html[data-theme="light"] .icon-moon { display: none; }
   .ingest-dialog .dialog-actions { padding: 12px 18px; }
   .ingest-heading h2 { font-size: 21px; }
 }
+
+/* Semantic index management stays separate from the conversation. */
+.library-actions { display: flex; gap: 6px; }
+.library-actions .ingest-open { flex: 1; width: auto; }
+.library-actions #index-open { flex-shrink: 0; border: 1px solid var(--line); background: var(--surface); }
+.index-dialog { width: min(660px, calc(100vw - 24px)); padding: 0; overflow: hidden; }
+.index-body { padding: 24px; max-height: calc(90dvh - 80px); overflow-y: auto; overscroll-behavior: contain; }
+.index-dialog > .dialog-actions { padding: 14px 24px; margin: 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.index-dialog #index-stop { margin-right: auto; }
+.index-dialog button:disabled { opacity: .4; cursor: not-allowed; }
+.index-summary { margin: 16px 0; line-height: 1.6; }
+.index-coverage { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+.index-coverage > div { border: 1px solid var(--line); background: var(--bg-soft); padding: 12px 10px; border-radius: 10px; display: grid; gap: 5px; }
+.index-coverage strong { font-size: 24px; font-weight: 550; }
+.index-coverage span, .index-coverage small { font-size: 11px; color: var(--muted); }
+.index-services, .index-documents, .index-preview { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+#index-services { margin-top: 10px; display: grid; gap: 8px; font-size: 12px; }
+#index-services p { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+#index-services .unavailable { color: var(--danger); }
+.index-settings { padding: 0 2px 8px; }
+.index-settings .dialog-field { max-width: 320px; }
+.index-documents ul { padding: 0; list-style: none; max-height: 180px; overflow-y: auto; font-size: 12px; }
+.index-documents li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.index-documents li span { min-width: 0; overflow-wrap: anywhere; }
+.index-documents small { color: var(--muted); white-space: nowrap; }
+#index-search-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; }
+#index-search-form > input { grid-column: 1 / -1; }
+.index-query-file { font-size: 11px; color: var(--muted); display: grid; gap: 5px; overflow: hidden; }
+.index-dialog .index-query-file input { padding: 4px; border: 0; font-size: 11px; }
+#index-results { display: grid; gap: 8px; margin-top: 12px; }
+.index-result { padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.index-result button { text-align: left; color: var(--accent); background: transparent; border: 0; padding: 0; font-size: 12px; }
+.index-result p { margin: 6px 0; overflow-wrap: anywhere; font-size: 12px; }
+.index-result small { color: var(--muted); }
+#index-job-detail { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 520px) { .index-body { padding: 18px; max-height: calc(90dvh - 100px); } .index-coverage { grid-template-columns: repeat(2,1fr); } .index-dialog > .dialog-actions { padding: 12px 18px; } }

@@ -12,6 +12,9 @@ from typing import Any
 from jsonschema import validate
 
 from .library import DocumentLibrary
+from .semantic.engine import SemanticEngine
+from .semantic.tools import SCHEMAS as SEMANTIC_TOOLS
+from .semantic.tools import call as semantic_call
 
 GUIDE = """DeepDocx document workflow (reference guidance; permissions and the current user request take precedence):
 For paper concepts, pasted excerpts and figures, first try a cheap lookup in the selected library.
@@ -88,17 +91,24 @@ TOOLS = [
 
 
 class DocumentServer:
-    def __init__(self, library: DocumentLibrary) -> None:
+    def __init__(self, library: DocumentLibrary, semantic: SemanticEngine | None=None, allowed_roots: tuple[Path,...]=()) -> None:
         self.library = library
+        self.semantic=semantic
+        self.allowed_roots=(library.root,*allowed_roots)
+        self.tools=TOOLS+SEMANTIC_TOOLS if semantic is not None else TOOLS
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         data: dict[str, Any]
-        tool = next((tool for tool in TOOLS if tool["name"] == name), None)
+        tool = next((tool for tool in self.tools if tool["name"] == name), None)
         if tool is None:
             raise ValueError("Unknown document tool")
         validate(arguments, tool["inputSchema"])
-        if name == "doc_guide":
+        if name in {'doc_semantic_search','doc_index_status'} and self.semantic is not None:
+            data=semantic_call(self.semantic,name,arguments,self.allowed_roots)
+        elif name == "doc_guide":
             data = {"guide": GUIDE, "root": str(self.library.root)}
+            if self.semantic is not None:
+                data['guide']=GUIDE.replace('Image embeddings and semantic vector search are not installed in this version. Do not claim to have used them.','Optional semantic indexes are available through doc_index_status and doc_semantic_search. Check coverage; use keyword or native file tools when absent. Generated captions are derived descriptions, not source quotations. Image+caption vectors use a separate native same-model endpoint. Never start index/build tasks through tools.')
         elif name == "doc_library":
             data = {"documents": self.library.documents(arguments.get("query", ""))[:200]}
             for doc in data["documents"]:
@@ -145,7 +155,7 @@ class DocumentServer:
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": self.tools}
         elif method == "tools/call":
             params = request.get("params") or {}
             try:
@@ -168,8 +178,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--doc", action="append", default=[])
+    parser.add_argument('--semantic-settings',type=Path)
+    parser.add_argument('--workspace',type=Path,default=Path.cwd())
     args = parser.parse_args()
-    server = DocumentServer(DocumentLibrary(args.root, tuple(args.doc)))
+    library=DocumentLibrary(args.root,tuple(args.doc))
+    semantic=None
+    roots: tuple[Path,...]=(args.workspace,)
+    if args.semantic_settings:
+        from .semantic.settings import parse_settings
+        raw=json.loads(args.semantic_settings.read_text())
+        index,caption=parse_settings(raw['index'],raw['caption'])
+        semantic=SemanticEngine(library,Path(raw['data_dir']),index,caption)
+        roots=(*roots,Path(raw['data_dir']))
+    server = DocumentServer(library,semantic,roots)
     for line in sys.stdin:
         try:
             request = json.loads(line)

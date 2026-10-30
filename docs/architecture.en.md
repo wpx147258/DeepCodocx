@@ -76,3 +76,12 @@ Persistent state lives in XDG directories. Workspace namespaces currently use a
 hash of the absolute working-directory path. Moving a workspace therefore
 requires handling its history namespace; see
 [troubleshooting](troubleshooting.en.md).
+
+## Independent document writers
+
+PDF ingestion and semantic indexing run as host services and background workers,
+with persistent jobs and no agent transcript changes. Bundle publication keeps
+source evidence immutable; derived vectors, captions, and hashes live under XDG.
+Document MCP exposes only status and search/read tools. Gitee standalone vectors
+and DashScope native fusion vectors use separate spaces and query encoders; RRF
+combines rankings. See [multimodal indexes](multimodal-index.en.md).

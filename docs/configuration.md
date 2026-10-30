@@ -111,3 +111,5 @@ enabled = true
 
 记忆由模型通过 `Remember` 写入，用于持久用户偏好和约束。模式资料和可重读的任务
 状态不依靠记忆保存；`--no-memory` 可禁用长期记忆。
+
+多模态索引使用独立的 Gitee embedding/caption 与百炼原生融合配置，详见[索引配置](multimodal-index.md)。

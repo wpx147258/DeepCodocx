@@ -111,6 +111,20 @@ def _line_blocks(page: Page) -> list[dict[str, Any]]:
         else:
             groups.append([word])
     blocks: list[dict[str, Any]] = []
+    # Preserve separate lines across a column gutter. Older Basic outputs may
+    # already contain row-wise interleaving; downstream grouping cannot recover
+    # word coordinates that were discarded during conversion.
+    separated: list[list[Word]]=[]
+    for group in groups:
+        current: list[Word]=[]
+        for word in sorted(group,key=lambda item:item.x0):
+            if current and word.x0-current[-1].x1 > max(30,page.width*0.06):
+                separated.append(current)
+                current=[]
+            current.append(word)
+        if current:
+            separated.append(current)
+    groups=separated
     for index, group in enumerate(groups):
         x0 = min(word.x0 for word in group)
         y0 = min(word.y0 for word in group)

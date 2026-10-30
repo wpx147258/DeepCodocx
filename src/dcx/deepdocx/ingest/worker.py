@@ -174,6 +174,22 @@ def run(job_path: Path) -> int:
         shutil.rmtree(staging, ignore_errors=True)
         if store.get(job_id)["status"] in {"succeeded", "partial", "cancelled"}:
             store.remove_uploads(job_id)
+    # Derived indexing is a separate task. Its failure never changes conversion
+    # success or writes anything into the agent's transcript.
+    final=store.get(job_id)
+    if final.get('semantic') and any(value=='published' for item in final['files'] for value in item['modes'].values()):
+        try:
+            from ..library import DocumentLibrary
+            from ..semantic.service import IndexService
+            from ..semantic.settings import parse_settings
+            settings=final['semantic']
+            index_settings,caption_settings=parse_settings(settings['index'],settings['caption'])
+            task=IndexService(Path(settings['data_dir']),index_settings,caption_settings).automatic(DocumentLibrary(Path(final['library_root'])))
+            with store.edit(job_id) as updated:
+                updated.setdefault('result',{})['semantic_job_id']=task['id'] if task else None
+        except Exception as exc:
+            with store.edit(job_id) as updated:
+                updated['warnings'].append(f'Semantic indexing could not be queued: {exc}')
     return 0 if store.get(job_id)["status"] == "succeeded" else 1
 
 

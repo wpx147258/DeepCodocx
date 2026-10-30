@@ -110,6 +110,7 @@ printf 'Describe this repository: entry points and main modules' | \
 |---|---|
 | [DeepDocx document guide](docs/deepdocx.en.md) | Libraries, figures, citations, and document MCP tools |
 | [CLI and Web guide](docs/usage.en.md) | Sessions, permissions, rewind, terminal commands, and structured output |
+| [Multimodal indexes](docs/multimodal-index.en.md) | Gitee embeddings, DashScope native fusion, captions, and incremental synchronization |
 | [Configuration](docs/configuration.en.md) | Providers, thinking, libraries, and external MCP servers |
 | [Architecture](docs/architecture.en.md) | The shared runtime, tool boundaries, context, and persistence |
 | [Development](docs/development.en.md) | Development setup, testing, and contribution conventions |
@@ -119,8 +120,10 @@ printf 'Describe this repository: entry points and main modules' | \
 
 Code tools, persistent sessions, keyword document search, text and image
 reading, and local stdio MCP are available today. Image and semantic vector
-search, generated captions, and remote MCP transports remain future work. PDF
-upload, Basic / Marker conversion, and indexing run as independent system jobs.
+search and generated descriptions are available through optional multimodal indexes;
+Gitee and DashScope queries stay in separate vector spaces. See the
+[multimodal index guide](docs/multimodal-index.en.md). Remote MCP transports remain
+future work. PDF upload, conversion, and indexing run as independent system jobs.
 
 The permission system provides approvals and operation controls. Use external
 isolation for untrusted tasks. The Web server binds to loopback by default;

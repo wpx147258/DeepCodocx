@@ -1384,6 +1384,7 @@
   // ---------------------------------------------------------- document workspace
 
   function applyDocumentMode(data) {
+    window.DcxIndexes?.setContext(data);
     const active = data.mode === "deepdocx";
     document.documentElement.dataset.mode = active ? "deepdocx" : "normal";
     document.querySelector(".brand-name").textContent = active ? "DeepDocx" : "dcx";
@@ -1656,7 +1657,7 @@
     ingestState.job = job;
     $("ingest-progress").hidden = false;
     const current = job.current;
-    $("ingest-status").textContent = (ingestLabels[job.status] || job.status) + (current ? ` · ${current.mode === "basic" ? "Basic" : "Marker"} · ${current.name}` : "");
+    $("ingest-status").textContent = (job.status === "succeeded" && job.result?.semantic_job_id ? "文档已添加，语义索引在后台同步" : ingestLabels[job.status] || job.status) + (current ? ` · ${current.mode === "basic" ? "Basic" : "Marker"} · ${current.name}` : "");
     const phases = job.mode === "both" ? 2 : 1;
     const total = Math.max(1, job.files.length * phases);
     const done = job.files.reduce((sum, item) => sum + Object.keys(item.modes || {}).length, 0);
@@ -1686,6 +1687,7 @@
       const data = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}`);
       if (ingestState.job?.id !== job.id) return;
       renderIngest(data);
+      window.DcxIndexes?.refreshIfOpen();
       if (job.library_id === state.data?.session_context?.library_id) await refreshDocumentNavigation();
       if (!INGEST_TERMINAL.has(data.status)) ingestState.timer = setTimeout(pollIngest, 1200);
     } catch (error) {
@@ -2575,6 +2577,7 @@
     $("deepdocx-register").addEventListener("click", registerLibrary);
     $("deepdocx-library").addEventListener("change", loadDocumentScope);
     $("deepdocx-form").addEventListener("submit", enterDocumentMode);
+    document.addEventListener("dcx-open-evidence", (event) => { if (typeof event.detail === "string") openEvidence(event.detail); });
     $("ingest-open").addEventListener("click", openIngestDialog);
     $("ingest-form").addEventListener("submit", startIngest);
     $("ingest-cancel").addEventListener("click", cancelIngest);

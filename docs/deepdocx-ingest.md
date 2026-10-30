@@ -133,6 +133,7 @@ Marker 需要单独准备可执行环境，页面预览与裁图还需要 `pdfto
 这里的检查不下载模型，也不能保证外部 Marker 环境的模型权重或 GPU 已经就绪；实际
 转换失败会进入任务结果。系统不会在上传请求中自动安装 Marker 或调用对话模型。
 
-首版只接受 PDF，没有向量索引，也没有自动 caption。Basic 不含 OCR；扫描版 PDF
+首版只接受 PDF。可选[多模态索引](multimodal-index.md)与生成描述在 bundle 发布后由另一系统任务处理；
+已启用同步的库会自动排队，基础转换不等待模型增强。Basic 不含 OCR；扫描版 PDF
 没有可提取文本时保留页面预览，并带有 `NO_TEXT` 质量标记。更多读侧能力见
 [DeepDocx 指南](deepdocx.md)。

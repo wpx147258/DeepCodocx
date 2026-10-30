@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .deepdocx.semantic.settings import CaptionConfig, IndexConfig, parse_settings
 from .errors import ConfigError
 
 APP_NAME = "dcx"
@@ -157,6 +158,8 @@ class AppConfig:
     document_libraries: tuple[str, ...] = ()
     default_document_library: str | None = None
     ingest: IngestConfig = field(default_factory=IngestConfig)
+    index: IndexConfig = field(default_factory=IndexConfig)
+    caption: CaptionConfig = field(default_factory=CaptionConfig)
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -336,6 +339,10 @@ def load_config(
     if default_document_library is not None and not isinstance(default_document_library, str):
         raise ConfigError("deepdocx.default_library must be a directory path")
     ingest = _parse_ingest(deepdocx.get("ingest", {}))
+    try:
+        index, caption = parse_settings(deepdocx.get("index", {}), deepdocx.get("caption", {}))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
     return AppConfig(
         paths=paths,
@@ -354,6 +361,8 @@ def load_config(
         document_libraries=tuple(str(path) for path in deepdocx.get("libraries", [])),
         default_document_library=default_document_library,
         ingest=ingest,
+        index=index,
+        caption=caption,
     )
 
 

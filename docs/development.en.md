@@ -27,6 +27,7 @@ fixtures and require neither a personal corpus nor an API key.
 uv run --with playwright python -m playwright install chromium
 uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-browser
 uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodocx-ingest
+uv run --with playwright python -m tests.e2e.semantic_smoke --output /tmp/deepcodocx-index
 ```
 
 This check uses a scripted provider with the real Web server, stdio MCP, and

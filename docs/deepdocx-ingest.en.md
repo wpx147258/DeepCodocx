@@ -158,7 +158,9 @@ containing spaces. Readiness checks do not download models or guarantee Marker
 weights and GPU readiness; actual converter errors appear in the job. Upload
 requests never install Marker or call a conversational model.
 
-Only PDFs are accepted. There is no vector indexing or generated captioning.
+Only PDFs are accepted. Optional [multimodal indexing](multimodal-index.en.md)
+and generated descriptions run as a separate system job after publication for
+libraries enrolled in automatic synchronization.
 Basic does not perform OCR; scanned PDFs without extractable text retain page
 previews and receive the `NO_TEXT` quality flag. For reading workflows, see the
 [DeepDocx guide](deepdocx.en.md).

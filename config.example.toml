@@ -58,3 +58,31 @@ marker_timeout = 1800
 # timeout = 30
 # [mcp_servers.notes.env]
 # NOTES_PATH = "/path/to/notes"
+
+# Optional semantic indexes; keys are read from the host environment only.
+[deepdocx.index]
+enabled = true
+auto_sync = false # A library's first manual sync enables its automatic ingestion sync.
+base_url = "https://ai.gitee.com/v1"
+api_key_env = "GITEE_API_KEY"
+model = "Qwen3-VL-Embedding-8B"
+dimensions = 1024
+batch_size = 8
+block_chars = 1800
+timeout = 60
+# Native image + caption fusion lives in a separate vector space.
+joint_protocol = "dashscope"
+joint_base_url = "https://dashscope.aliyuncs.com/api/v1"
+joint_key_env = "DASHSCOPE_API_KEY"
+joint_model = "qwen3-vl-embedding"
+joint_dimensions = 1024
+revision = "qwen3-vl-v1"
+
+[deepdocx.caption]
+enabled = true
+base_url = "https://ai.gitee.com/v1"
+api_key_env = "GITEE_API_KEY"
+model = "qwen3.8-flash" # Also selectable in the UI: DeepSeek-V4.1-Flash-1017
+max_tokens = 800
+timeout = 90
+revision = "scientific-description-v1"

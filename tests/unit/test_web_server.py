@@ -495,6 +495,9 @@ async def test_token_protects_api_but_not_the_page(tmp_path: Path) -> None:
         denied = await client.get("/api/bootstrap")
         assert denied.status_code == 401
         assert (await client.get("/api/ingest/environment")).status_code == 401
+        assert (await client.get("/api/index/status")).status_code == 401
+        assert (await client.post("/api/index/sync",json={})).status_code == 401
+        assert (await client.post("/api/index/search",json={})).status_code == 401
         assert (await client.post("/api/ingest/jobs", json={})).status_code == 401
         wrong = await client.get(
             "/api/bootstrap", headers={"X-DCX-Token": "nope"}

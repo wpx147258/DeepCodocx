@@ -47,7 +47,7 @@
         <div id="document-navigation" class="side-section" hidden>
           <div class="side-label">文档库</div>
           <button class="ghost library-name" id="library-name" type="button" title="选择文档库与范围"></button>
-          <button class="ghost small ingest-open" id="ingest-open" type="button">＋ 添加文档</button>
+          <div class="library-actions"><button class="ghost small ingest-open" id="ingest-open" type="button">＋ 添加文档</button><button class="ghost small" id="index-open" type="button" title="管理文本、图像与图注索引">索引管理</button></div>
           <input id="document-search" class="document-search" type="search" placeholder="查找论文…" aria-label="查找论文">
           <div class="document-list" id="document-list"></div>
         </div>
@@ -230,6 +230,24 @@
     </form>
   </dialog>
 
+  <dialog id="index-dialog" class="deepdocx-dialog index-dialog" aria-labelledby="index-title">
+    <div class="index-body">
+      <div class="ingest-heading"><div><h2 id="index-title">文档库索引</h2><p id="index-library"></p></div><button class="icon-btn" id="index-dismiss" type="button" aria-label="关闭索引管理">×</button></div>
+      <p id="index-summary" class="index-summary" role="status">正在读取索引状态…</p>
+      <div class="index-coverage" id="index-coverage"></div>
+      <details class="index-services"><summary>模型与服务状态</summary><div id="index-services"></div></details>
+      <div class="index-settings">
+        <label class="ingest-replace"><input id="index-captions" type="checkbox"><span><strong>生成图片描述</strong><small>原始图注单独保留；视觉模型描述用于索引，并标记来源。</small></span></label>
+        <label class="dialog-field"><span>描述模型</span><select id="index-caption-model"><option value="qwen3.8-flash">Qwen3.8-Flash</option><option value="DeepSeek-V4.1-Flash-1017">DeepSeek-V4.1-Flash-1017</option></select></label>
+      </div>
+      <div id="index-progress" class="ingest-progress" hidden><div class="ingest-progress-head"><strong id="index-job-status"></strong><span id="index-job-count"></span></div><div class="meter"><span id="index-bar"></span></div><p id="index-job-detail"></p></div>
+      <details class="index-documents"><summary>文档同步状态</summary><ul id="index-documents"></ul></details>
+      <details class="index-preview"><summary>试用语义检索</summary><form id="index-search-form"><label class="sr-only" for="index-query">检索文字</label><input id="index-query" placeholder="描述概念、图表内容，或搭配图片查找…" maxlength="12000"><label class="index-query-file">选择查询图片<input id="index-query-image" type="file" accept="image/png,image/jpeg,image/webp"></label><select id="index-query-kind" aria-label="检索表征"><option value="">全部表征</option><option value="text_block">文本块</option><option value="image">图像</option><option value="caption_original,caption_generated">图注／描述</option><option value="image_caption_original,image_caption_generated">原生图文联合</option></select><button class="ghost" id="index-search" type="submit">查找来源</button></form><div id="index-results" aria-live="polite"></div></details>
+      <p id="index-error" class="dialog-error" role="alert" hidden></p>
+    </div>
+    <div class="dialog-actions"><button class="ghost danger" id="index-stop" type="button" hidden>停止任务</button><button class="ghost" id="index-refresh" type="button">刷新</button><button class="ghost" id="index-rebuild" type="button">重新生成</button><button class="primary" id="index-sync" type="button" disabled>同步索引</button></div>
+  </dialog>
+
   <div class="modal-backdrop" id="permission" hidden>
     <div class="permission" role="dialog" aria-modal="true" aria-labelledby="perm-title">
       <div class="perm-head">
@@ -307,5 +325,6 @@
   </template>
 
   <script src="/static/app.js" defer></script>
+  <script src="/static/indexes.js" defer></script>
 </body>
 </html>

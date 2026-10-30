@@ -128,3 +128,6 @@ Shell rules are not a shell parser or an isolation boundary. See the
 The model writes memory through `Remember` for durable user preferences and
 constraints. Mode guidance and task state that can be read again do not depend
 on memory. Use `--no-memory` to disable long-term memory.
+
+Multimodal indexes have independent Gitee embedding/caption and DashScope native
+fusion configuration. See the [index guide](multimodal-index.en.md).

@@ -13,6 +13,16 @@
 - The CLI owns input and rendering only. It must never append to the transcript, mutate
   the model, or count usage.
 - Runtime state lives under XDG data directories. Do not write state into the project.
+- DeepDocx ingestion and semantic-index workers are system services outside the
+  agent runtime. They must not create agent turns, edit transcripts, or expose
+  index/build/caption write operations as model tools. Runtime dependency wiring
+  remains in `assembly.py`; system job services own their separate worker lifecycle.
+- Bundles are source evidence. Keep generated captions, vectors, input hashes, and
+  index jobs in the XDG derivative store. Preserve original locators and bundle
+  checksums. Filter missing, stale, and out-of-scope sources at query time.
+- Gitee standalone embeddings and DashScope native fusion use separate vector
+  spaces. Encode queries per space and combine rankings; never compare vectors
+  across spaces or substitute averaged vectors for native image/text fusion.
 
 ## Rules
 

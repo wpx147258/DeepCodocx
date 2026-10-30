@@ -329,6 +329,7 @@ class DocumentLibrary:
                     "page": raw.get("page_range", [1])[0],
                     "bbox": raw.get("bbox"),
                     "assets": raw.get("asset_ids", []),
+                    "heading_path": raw.get("heading_path", []),
                 }
             else:
                 text = raw.get("text") or {}
@@ -342,6 +343,7 @@ class DocumentLibrary:
                     "page": raw.get("page", 1),
                     "bbox": raw.get("bbox"),
                     "assets": (raw.get("assets") or {}).get("images", []),
+                    "heading_path": raw.get("section_path", []),
                 }
             if not isinstance(unit["id"], str) or not _PART.fullmatch(unit["id"]):
                 raise ValueError("Invalid unit id")

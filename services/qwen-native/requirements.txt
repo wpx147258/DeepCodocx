@@ -1,0 +1,5 @@
+# Install separately from the lightweight dcx host, on the inference machine.
+# Install a torch wheel appropriate to that machine's CUDA version first.
+sentence-transformers>=5.3
+transformers>=4.57
+qwen-vl-utils>=0.0.14

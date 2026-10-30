@@ -24,6 +24,7 @@ node --check src/dcx/web/static/app.js
 uv run --with playwright python -m playwright install chromium
 uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-browser
 uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodocx-ingest
+uv run --with playwright python -m tests.e2e.semantic_smoke --output /tmp/deepcodocx-index
 ```
 
 该验收使用脚本 provider，运行真实 Web 服务、stdio MCP 和浏览器，检查旧版浏览器设置迁移、文档库默认值、
