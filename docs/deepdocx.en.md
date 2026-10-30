@@ -190,8 +190,9 @@ another service, use its actual returned schema.
 ## Current limitations
 
 Vector search, image similarity retrieval, generated captions, semantic block
-indexes, PDF upload/ingestion, remote MCP transports, and multi-user operation
-are not implemented in this version. For an uploaded image, a vision-capable
+indexes, remote MCP transports, and multi-user operation are not implemented
+in this version. PDF ingestion runs as an independent system job, described in
+the [ingestion guide](deepdocx-ingest.en.md), and is not an agent tool. For an uploaded image, a vision-capable
 model can extract visible terms and try keyword lookup. Images without text
 need other available clues or future vector tools. The agent should not claim
 to have performed vector search.

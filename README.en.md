@@ -68,7 +68,9 @@ compatibility. See the [upgrade notes](docs/troubleshooting.en.md).
 
 Click **DeepDocx**, choose a fresh session or fork the current discussion, and
 connect an existing basic / Marker bundle directory. You can limit the scope to
-selected papers, and the library selection is remembered across restarts.
+selected papers, and the library selection is remembered across restarts. In the
+workspace, **添加文档** (Add documents) uploads PDFs and converts them with Basic,
+Marker, or both as a background system job. See the [ingestion guide](docs/deepdocx-ingest.en.md).
 
 You can also start directly in document mode:
 
@@ -117,8 +119,8 @@ printf 'Describe this repository: entry points and main modules' | \
 
 Code tools, persistent sessions, keyword document search, text and image
 reading, and local stdio MCP are available today. Image and semantic vector
-search, generated captions, PDF upload and ingestion, and remote MCP transports
-remain future work.
+search, generated captions, and remote MCP transports remain future work. PDF
+upload, Basic / Marker conversion, and indexing run as independent system jobs.
 
 The permission system provides approvals and operation controls. Use external
 isolation for untrusted tasks. The Web server binds to loopback by default;

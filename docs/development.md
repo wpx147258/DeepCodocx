@@ -23,10 +23,13 @@ node --check src/dcx/web/static/app.js
 ```bash
 uv run --with playwright python -m playwright install chromium
 uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-browser
+uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodocx-ingest
 ```
 
 该验收使用脚本 provider，运行真实 Web 服务、stdio MCP 和浏览器，检查旧版浏览器设置迁移、文档库默认值、
 选择记忆、fork/new、搜索、图片、引用、会话隔离及窄屏布局。
+入库验收需要 Poppler，使用微型 PDF 运行真实上传、独立 worker 与索引，检查小窗口侧栏、
+移动端弹窗、选项联动和取消恢复，并断言没有模型调用或对话写入。见[文档入库](deepdocx-ingest.md)。
 输出目录中的截图用于界面核对。附加 `--library /path/to/paper-bundles` 可检查包含
 MEMORYVLA Marker 产物的真实本地语料，目录只读访问。
 

@@ -34,22 +34,26 @@
         New chat
       </button>
 
-      <div class="side-section">
-        <div class="side-label">Chats</div>
-        <div class="chat-search">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-          <input id="chat-search" type="search" placeholder="Search chats…" autocomplete="off" aria-label="Search chats">
+      <div class="side-scroll">
+        <div class="side-section">
+          <div class="side-label">Chats</div>
+          <div class="chat-search">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <input id="chat-search" type="search" placeholder="Search chats…" autocomplete="off" aria-label="Search chats">
+          </div>
+          <div class="chat-list" id="chat-list"></div>
         </div>
-        <div class="chat-list" id="chat-list"></div>
-      </div>
 
-      <div class="side-section side-settings">
-        <div id="document-navigation" hidden>
+        <div id="document-navigation" class="side-section" hidden>
           <div class="side-label">文档库</div>
           <button class="ghost library-name" id="library-name" type="button" title="选择文档库与范围"></button>
+          <button class="ghost small ingest-open" id="ingest-open" type="button">＋ 添加文档</button>
           <input id="document-search" class="document-search" type="search" placeholder="查找论文…" aria-label="查找论文">
           <div class="document-list" id="document-list"></div>
         </div>
+      </div>
+
+      <div class="side-section side-settings">
         <div class="side-label">Model</div>
         <div class="select-wrap">
           <select id="model-select" aria-label="Model"></select>
@@ -182,6 +186,47 @@
       <details><summary>限定文档范围（默认整个库）</summary><div id="deepdocx-scope" class="deepdocx-scope"></div></details>
       <p id="deepdocx-error" class="dialog-error" role="status" hidden></p>
       <div class="dialog-actions"><button class="ghost" id="deepdocx-cancel" type="button">取消</button><button class="primary" id="deepdocx-enter" type="submit">进入文档工作区 →</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ingest-dialog" class="deepdocx-dialog ingest-dialog" aria-labelledby="ingest-title" aria-describedby="ingest-description">
+    <form id="ingest-form" novalidate>
+      <div class="ingest-body">
+        <div class="ingest-heading">
+          <div><h2 id="ingest-title">添加文档</h2><p id="ingest-description">上传 PDF，转换后即可在文档库中搜索、阅读与查看图表。</p></div>
+          <button class="icon-btn" id="ingest-dismiss" type="button" aria-label="关闭添加文档">×</button>
+        </div>
+        <div class="ingest-target"><span>添加到</span><strong id="ingest-library"></strong></div>
+        <div id="ingest-options">
+          <div class="ingest-drop" id="ingest-drop">
+            <input id="ingest-files" class="sr-only" type="file" accept=".pdf,application/pdf" multiple aria-label="选择 PDF 文件">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M12 17v-5m-2 2 2-2 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <button class="ghost" id="ingest-pick" type="button">选择 PDF 文件</button>
+            <span>或拖放文件到这里</span>
+            <small id="ingest-limits">正在检查转换环境…</small>
+          </div>
+          <ul class="ingest-files" id="ingest-selected" aria-label="已选择的 PDF" hidden></ul>
+          <fieldset class="ingest-modes" id="ingest-modes"><legend>转换方式</legend>
+            <label class="ingest-option"><input type="radio" name="ingest-mode" value="basic" checked><span><strong>Basic <small>快速开始</small></strong><span>文本定位与页面预览</span><small data-ingest-reason="basic"></small></span></label>
+            <label class="ingest-option"><input type="radio" name="ingest-mode" value="marker"><span><strong>Marker</strong><span>识别段落、图表和公式，耗时较长</span><small data-ingest-reason="marker"></small></span></label>
+            <label class="ingest-option"><input type="radio" name="ingest-mode" value="both"><span><strong>两种方式</strong><span>先生成 Basic，再以 Marker 补充结构与图表</span><small data-ingest-reason="both"></small></span></label>
+          </fieldset>
+          <label class="ingest-replace"><input id="ingest-force" type="checkbox"><span><strong>替换已有产物</strong><small>默认跳过已有产物；勾选后重新生成同一 PDF 的所选类型。</small></span></label>
+        </div>
+        <div class="ingest-environment"><p id="ingest-env" aria-live="polite"></p><button class="ghost small" id="ingest-retry" type="button" hidden>重新检查</button></div>
+        <div id="ingest-progress" class="ingest-progress" hidden>
+          <div class="ingest-progress-head"><strong id="ingest-status" role="status"></strong><span id="ingest-count"></span></div>
+          <div class="meter" role="progressbar" id="ingest-meter" aria-label="文档转换进度" aria-valuemin="0" aria-valuemax="100"><span id="ingest-bar"></span></div>
+          <div class="ingest-list" id="ingest-list"></div>
+        </div>
+        <p id="ingest-error" class="dialog-error" role="alert" hidden></p>
+      </div>
+      <div class="dialog-actions">
+        <button class="ghost danger" id="ingest-cancel" type="button" hidden>停止任务</button>
+        <button class="ghost" id="ingest-close" type="button">关闭</button>
+        <button class="ghost" id="ingest-new" type="button" hidden>继续添加</button>
+        <button class="primary" id="ingest-start" type="submit" disabled>开始生成</button>
+      </div>
     </form>
   </dialog>
 

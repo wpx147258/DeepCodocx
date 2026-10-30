@@ -129,6 +129,17 @@ class RuleConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class IngestConfig:
+    """System-side document ingestion settings (never agent runtime)."""
+
+    basic_dpi: int = 72
+    max_upload_mb: int = 200
+    max_files: int = 50
+    marker_command: str = "marker_single"
+    marker_timeout: int = 1800
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     paths: AppPaths
     default_provider: str
@@ -145,6 +156,7 @@ class AppConfig:
     mcp_servers: Mapping[str, Any] = field(default_factory=dict)
     document_libraries: tuple[str, ...] = ()
     default_document_library: str | None = None
+    ingest: IngestConfig = field(default_factory=IngestConfig)
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -323,6 +335,7 @@ def load_config(
     default_document_library = deepdocx.get("default_library")
     if default_document_library is not None and not isinstance(default_document_library, str):
         raise ConfigError("deepdocx.default_library must be a directory path")
+    ingest = _parse_ingest(deepdocx.get("ingest", {}))
 
     return AppConfig(
         paths=paths,
@@ -340,7 +353,38 @@ def load_config(
         mcp_servers=mcp_servers,
         document_libraries=tuple(str(path) for path in deepdocx.get("libraries", [])),
         default_document_library=default_document_library,
+        ingest=ingest,
     )
+
+
+def _parse_ingest(raw: object) -> IngestConfig:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigError("deepdocx.ingest must be a table")
+    basic_dpi = _optional_int(raw, "basic_dpi")
+    max_upload_mb = _optional_int(raw, "max_upload_mb")
+    max_files = _optional_int(raw, "max_files")
+    marker_timeout = _optional_int(raw, "marker_timeout")
+    marker_command = raw.get("marker_command", "marker_single")
+    if not isinstance(marker_command, str) or not marker_command.strip():
+        raise ConfigError("deepdocx.ingest.marker_command must be a non-empty string")
+    settings = IngestConfig(
+        basic_dpi=72 if basic_dpi is None else basic_dpi,
+        max_upload_mb=200 if max_upload_mb is None else max_upload_mb,
+        max_files=50 if max_files is None else max_files,
+        marker_command=marker_command,
+        marker_timeout=1800 if marker_timeout is None else marker_timeout,
+    )
+    if not 36 <= settings.basic_dpi <= 600:
+        raise ConfigError("deepdocx.ingest.basic_dpi must be between 36 and 600")
+    if not 1 <= settings.max_upload_mb <= 2048:
+        raise ConfigError("deepdocx.ingest.max_upload_mb must be between 1 and 2048")
+    if not 1 <= settings.max_files <= 200:
+        raise ConfigError("deepdocx.ingest.max_files must be between 1 and 200")
+    if settings.marker_timeout < 30:
+        raise ConfigError("deepdocx.ingest.marker_timeout must be at least 30 seconds")
+    return settings
 
 
 def _merge_provider(base: ProviderConfig, raw: Mapping[str, Any]) -> ProviderConfig:

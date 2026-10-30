@@ -1564,6 +1564,278 @@
     }
   }
 
+  // --------------------------------------------------------------- ingestion
+  const INGEST_TERMINAL = new Set(["succeeded", "partial", "failed", "cancelled"]);
+  const ingestState = { job: null, timer: null, files: [], env: null, checking: false, submitting: false, cancelling: false, request: 0, libraryId: null, controller: null };
+  const ingestLabels = { uploading: "正在上传", queued: "等待转换", running: "正在转换", indexing: "正在更新索引", succeeded: "文档已添加", partial: "部分完成，请查看详情", failed: "添加失败", cancelled: "任务已停止", published: "已生成", skipped: "已存在，已跳过", failed_mode: "失败" };
+
+  function ingestError(message) {
+    $("ingest-error").textContent = message || "";
+    $("ingest-error").hidden = !message;
+  }
+
+  function ingestFailure(error) {
+    const message = error.message || String(error);
+    if (/failed to fetch|networkerror|load failed/i.test(message)) return "无法连接服务。请确认 dcx Web 正在运行，再重试。";
+    if (/\(404\)/.test(message)) return "当前服务不支持文档入库，请重启更新后的 dcx Web。";
+    return message;
+  }
+
+  function ingestModeReady(mode) {
+    const env = ingestState.env;
+    return !!env && (mode === "basic" ? env.basic_ready : mode === "marker" ? env.marker_ready : env.basic_ready && env.marker_ready);
+  }
+
+  function ingestValidation() {
+    const env = ingestState.env;
+    if (!env) return "";
+    const files = ingestState.files;
+    if (files.length > env.max_files) return `每次最多添加 ${env.max_files} 个 PDF，请移除多余文件。`;
+    const names = new Set();
+    for (const file of files) {
+      if (!/\.pdf$/i.test(file.name)) return `${file.name}：仅支持 PDF 文件。`;
+      if (!file.size) return `${file.name}：文件为空。`;
+      if (file.size > env.max_upload_mb * 1024 * 1024) return `${file.name}：超过每个文件 ${env.max_upload_mb} MB 的限制。`;
+      if (names.has(file.name)) return "存在同名 PDF，请重命名其中一个文件再添加。";
+      names.add(file.name);
+    }
+    return "";
+  }
+
+  function updateIngestControls() {
+    const job = ingestState.job;
+    const active = !!job && !INGEST_TERMINAL.has(job.status);
+    const terminal = !!job && INGEST_TERMINAL.has(job.status);
+    const locked = ingestState.submitting || active;
+    $("ingest-options").hidden = !!job;
+    $("ingest-start").hidden = !!job;
+    $("ingest-new").hidden = !terminal;
+    $("ingest-new").disabled = ingestState.submitting;
+    $("ingest-cancel").hidden = !active;
+    $("ingest-cancel").disabled = ingestState.cancelling;
+    $("ingest-cancel").textContent = ingestState.cancelling ? "正在停止…" : "停止任务";
+    $("ingest-close").textContent = active && job.status !== "uploading" ? "后台运行" : "关闭";
+    $("ingest-pick").disabled = locked;
+    $("ingest-files").disabled = locked;
+    $("ingest-force").disabled = locked;
+    for (const input of $("ingest-modes").querySelectorAll("input")) input.disabled = locked || ingestState.checking || !ingestModeReady(input.value);
+    const mode = $("ingest-form").querySelector('input[name="ingest-mode"]:checked')?.value;
+    $("ingest-start").disabled = locked || ingestState.checking || !ingestState.files.length || !ingestModeReady(mode) || !!ingestValidation();
+    $("ingest-start").textContent = ingestState.submitting ? "正在准备…" : "开始生成";
+    $("ingest-open").textContent = active && job.library_id === state.data?.session_context?.library_id ? "◌ 查看添加进度" : "＋ 添加文档";
+  }
+
+  function selectIngestFiles(files) {
+    if (ingestState.submitting || ingestState.job) return;
+    for (const file of files) {
+      if (!ingestState.files.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified)) ingestState.files.push(file);
+    }
+    renderSelectedFiles();
+  }
+
+  function renderSelectedFiles() {
+    const list = $("ingest-selected");
+    list.replaceChildren();
+    list.hidden = !ingestState.files.length;
+    ingestState.files.forEach((file, index) => {
+      const row = h("li");
+      const name = h("span", "", file.name);
+      const size = h("small", "", `${(file.size / 1024 / 1024).toFixed(1)} MB`);
+      const remove = h("button", "icon-btn", "×");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移除 ${file.name}`);
+      remove.addEventListener("click", () => { ingestState.files.splice(index, 1); renderSelectedFiles(); });
+      row.append(name, size, remove);
+      list.appendChild(row);
+    });
+    ingestError(ingestValidation());
+    updateIngestControls();
+  }
+
+  function renderIngest(job) {
+    ingestState.job = job;
+    $("ingest-progress").hidden = false;
+    const current = job.current;
+    $("ingest-status").textContent = (ingestLabels[job.status] || job.status) + (current ? ` · ${current.mode === "basic" ? "Basic" : "Marker"} · ${current.name}` : "");
+    const phases = job.mode === "both" ? 2 : 1;
+    const total = Math.max(1, job.files.length * phases);
+    const done = job.files.reduce((sum, item) => sum + Object.keys(item.modes || {}).length, 0);
+    const percent = job.status === "succeeded" ? 100 : Math.round(done / total * 100);
+    $("ingest-count").textContent = `${done} / ${total}`;
+    $("ingest-bar").style.width = `${percent}%`;
+    $("ingest-meter").setAttribute("aria-valuenow", String(percent));
+    $("ingest-list").replaceChildren();
+    for (const item of job.files) {
+      const row = h("div");
+      row.appendChild(h("span", "", item.name));
+      const details = Object.entries(item.modes || {}).map(([mode, result]) => `${mode === "basic" ? "Basic" : "Marker"}：${result === "failed" ? "失败" : ingestLabels[result] || result}`);
+      row.appendChild(h("small", item.error ? "failed" : "", item.error || details.join(" · ") || (job.status === "uploading" ? "已上传，等待开始" : "等待转换")));
+      $("ingest-list").appendChild(row);
+    }
+    const warnings = [job.error, ...(job.warnings || []).slice(-2)].filter(Boolean);
+    if (job.status === "uploading" && !ingestState.submitting) warnings.push("上传尚未完成。请停止此任务后重新选择文件。");
+    ingestError(warnings.join(" · "));
+    updateIngestControls();
+  }
+
+  async function pollIngest() {
+    clearTimeout(ingestState.timer);
+    const job = ingestState.job;
+    if (!job || ingestState.submitting) return;
+    try {
+      const data = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}`);
+      if (ingestState.job?.id !== job.id) return;
+      renderIngest(data);
+      if (job.library_id === state.data?.session_context?.library_id) await refreshDocumentNavigation();
+      if (!INGEST_TERMINAL.has(data.status)) ingestState.timer = setTimeout(pollIngest, 1200);
+    } catch (error) {
+      if (ingestState.job?.id !== job.id) return;
+      ingestError(ingestFailure(error));
+      ingestState.timer = setTimeout(pollIngest, 2500);
+    }
+  }
+
+  async function checkIngestEnvironment() {
+    const request = ++ingestState.request;
+    ingestState.checking = true;
+    ingestState.env = null;
+    $("ingest-retry").hidden = true;
+    $("ingest-env").textContent = "正在检查转换环境…";
+    updateIngestControls();
+    try {
+      const env = await api("/api/ingest/environment");
+      if (request !== ingestState.request) return;
+      ingestState.env = env;
+      $("ingest-limits").textContent = `每次最多 ${env.max_files} 个文件，每个不超过 ${env.max_upload_mb} MB`;
+      for (const mode of ["basic", "marker", "both"]) {
+        const ready = ingestModeReady(mode);
+        const reason = mode === "basic" ? env.basic_reason : mode === "marker" ? env.marker_reason : [env.basic_reason, env.marker_reason].filter(Boolean).join("；");
+        const note = document.querySelector(`[data-ingest-reason="${mode}"]`);
+        note.textContent = ready ? "" : mode === "both" ? "需要 Basic 与 Marker 均可用" : mode === "basic" ? "服务端尚未启用 PDF 基础转换" : "服务端尚未启用 Marker 转换";
+        note.title = reason || "";
+      }
+      const selected = $("ingest-form").querySelector('input[name="ingest-mode"]:checked');
+      if (!selected || !ingestModeReady(selected.value)) {
+        if (selected) selected.checked = false;
+        const available = ["basic", "marker", "both"].find(ingestModeReady);
+        if (available) $("ingest-form").querySelector(`input[value="${available}"]`).checked = true;
+      }
+      $("ingest-env").textContent = env.basic_ready || env.marker_ready ? "转换在后台执行，关闭此窗口后可继续对话。" : "当前没有可用的转换方式，请配置服务端转换环境后重试。";
+      $("ingest-retry").hidden = env.basic_ready && env.marker_ready;
+      if (!ingestState.job) ingestError(ingestValidation());
+    } catch (error) {
+      if (request !== ingestState.request) return;
+      $("ingest-env").textContent = "无法检查转换环境，暂时不能开始。";
+      $("ingest-retry").hidden = false;
+      ingestError(ingestFailure(error));
+    } finally {
+      if (request === ingestState.request) { ingestState.checking = false; updateIngestControls(); }
+    }
+  }
+
+  function resetIngest() {
+    clearTimeout(ingestState.timer);
+    ingestState.job = null;
+    ingestState.files = [];
+    $("ingest-files").value = "";
+    $("ingest-force").checked = false;
+    $("ingest-form").querySelector('input[value="basic"]').checked = true;
+    $("ingest-progress").hidden = true;
+    renderSelectedFiles();
+  }
+
+  async function openIngestDialog() {
+    const libraryId = state.data?.session_context?.library_id;
+    if (state.data?.mode !== "deepdocx" || !libraryId) { toast("请先进入 DeepDocx 文档工作区。"); return; }
+    const same = ingestState.libraryId === libraryId;
+    if (!same && ingestState.submitting) { toast("请等待当前文件上传完成。"); return; }
+    if (!same) resetIngest();
+    ingestState.libraryId = libraryId;
+    const library = state.data.libraries?.find((item) => item.id === libraryId);
+    $("ingest-library").textContent = library?.name || "当前文档库";
+    $("ingest-library").title = library?.root || "";
+    $("ingest-dialog").showModal();
+    const checking = checkIngestEnvironment();
+    try {
+      if (!ingestState.job && !ingestState.submitting) {
+        const data = await api(`/api/ingest/jobs?library_id=${encodeURIComponent(libraryId)}`);
+        if (ingestState.libraryId === libraryId && !ingestState.job && !ingestState.submitting) {
+          const recent = data.jobs?.find((job) => !INGEST_TERMINAL.has(job.status));
+          if (recent) renderIngest(recent);
+        }
+      }
+      if (ingestState.job) { renderIngest(ingestState.job); pollIngest(); }
+    } catch (error) { ingestError(ingestFailure(error)); }
+    await checking;
+  }
+
+  async function startIngest(event) {
+    event.preventDefault();
+    if ($("ingest-start").disabled || ingestState.submitting || ingestState.job) return;
+    const files = [...ingestState.files];
+    const libraryId = ingestState.libraryId;
+    const mode = $("ingest-form").querySelector('input[name="ingest-mode"]:checked')?.value;
+    if (!files.length || !ingestModeReady(mode) || ingestValidation()) { ingestError(ingestValidation() || "请检查文件与转换方式。"); return; }
+    ingestState.submitting = true;
+    ingestState.controller = new AbortController();
+    ingestError("");
+    updateIngestControls();
+    try {
+      for (const file of files) {
+        if (await file.slice(0, 5).text() !== "%PDF-") throw new Error(`${file.name}：不是有效的 PDF 文件。`);
+      }
+      let job = await api("/api/ingest/jobs", { library_id: libraryId, mode, force: $("ingest-force").checked });
+      renderIngest(job);
+      for (const file of files) {
+        const response = await fetch(`/api/ingest/jobs/${encodeURIComponent(job.id)}/files?name=${encodeURIComponent(file.name)}`, {
+          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/pdf" }, body: file, signal: ingestState.controller.signal,
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || `Upload failed (${response.status})`);
+        if (ingestState.cancelling || ingestState.controller.signal.aborted) return;
+        renderIngest(data);
+      }
+      if (ingestState.controller.signal.aborted) return;
+      job = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}/start`, {});
+      if (ingestState.controller.signal.aborted) return;
+      renderIngest(job);
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        const job = ingestState.job;
+        if (job) {
+          try {
+            const latest = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}`);
+            if (latest.status === "uploading") renderIngest(await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}/cancel`, {}));
+            else renderIngest(latest);
+          } catch (_) { /* Reopening the panel can recover the persisted task. */ }
+        }
+        ingestError(ingestFailure(error));
+      }
+    } finally {
+      ingestState.submitting = false;
+      updateIngestControls();
+      if (ingestState.job && !INGEST_TERMINAL.has(ingestState.job.status)) pollIngest();
+    }
+  }
+
+  async function cancelIngest() {
+    const job = ingestState.job;
+    if (!job || ingestState.cancelling) return;
+    ingestState.cancelling = true;
+    ingestState.controller?.abort();
+    clearTimeout(ingestState.timer);
+    updateIngestControls();
+    try {
+      renderIngest(await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}/cancel`, {}));
+      if (job.library_id === state.data?.session_context?.library_id) await refreshDocumentNavigation();
+    } catch (error) { ingestError(ingestFailure(error)); }
+    finally {
+      ingestState.cancelling = false;
+      updateIngestControls();
+      if (ingestState.job && !INGEST_TERMINAL.has(ingestState.job.status)) pollIngest();
+    }
+  }
+
   function populateModels(models, data) {
     const select = $("model-select");
     const current = modelValue(data.provider, data.model);
@@ -2303,6 +2575,18 @@
     $("deepdocx-register").addEventListener("click", registerLibrary);
     $("deepdocx-library").addEventListener("change", loadDocumentScope);
     $("deepdocx-form").addEventListener("submit", enterDocumentMode);
+    $("ingest-open").addEventListener("click", openIngestDialog);
+    $("ingest-form").addEventListener("submit", startIngest);
+    $("ingest-cancel").addEventListener("click", cancelIngest);
+    for (const id of ["ingest-close", "ingest-dismiss"]) $(id).addEventListener("click", () => $("ingest-dialog").close());
+    $("ingest-new").addEventListener("click", () => { resetIngest(); checkIngestEnvironment(); });
+    $("ingest-retry").addEventListener("click", checkIngestEnvironment);
+    $("ingest-pick").addEventListener("click", () => $("ingest-files").click());
+    $("ingest-files").addEventListener("change", () => { selectIngestFiles($("ingest-files").files); $("ingest-files").value = ""; });
+    $("ingest-modes").addEventListener("change", updateIngestControls);
+    $("ingest-drop").addEventListener("dragover", (event) => { event.preventDefault(); $("ingest-drop").classList.add("dragging"); });
+    $("ingest-drop").addEventListener("dragleave", () => $("ingest-drop").classList.remove("dragging"));
+    $("ingest-drop").addEventListener("drop", (event) => { event.preventDefault(); event.stopPropagation(); $("ingest-drop").classList.remove("dragging"); selectIngestFiles(event.dataTransfer.files); });
     $("document-search").addEventListener("input", refreshDocumentNavigation);
     $("evidence-close").addEventListener("click", closeEvidence);
     document.addEventListener("click", (event) => {

@@ -1,4 +1,10 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:venv",
-    "python-envs.defaultPackageManager": "ms-python.python:pip"
+    "python-envs.defaultPackageManager": "ms-python.python:pip",
+    "remote.portsAttributes": {
+        "8765": {
+            "label": "dcx web",
+            "onAutoForward": "silent"
+        }
+    }
 }

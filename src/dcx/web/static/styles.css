@@ -53,7 +53,7 @@ html[data-mode="deepdocx"] .topbar { background: var(--bg); }
 .deepdocx-entry { white-space: nowrap; }
 .library-name { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .document-search { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); margin: 8px 0; }
-.document-list { max-height: 210px; overflow-y: auto; display: grid; gap: 3px; }
+.document-list { min-height: 0; overflow-y: auto; display: grid; gap: 3px; }
 .document-item { font-size: 12px; background: transparent; border: 0; border-radius: 7px; text-align: left; padding: 7px 8px; color: var(--ink-soft); line-height: 1.45; }
 .document-item:hover { background: var(--surface-2); color: var(--ink); }
 .deepdocx-dialog { width: min(540px, calc(100vw - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow-lg); max-height: 90dvh; }
@@ -171,7 +171,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   padding: 18px 14px 14px;
   border-right: 1px solid var(--line);
   background:
@@ -232,6 +232,10 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .new-chat:active { transform: translateY(0); }
 .new-chat svg { width: 16px; height: 16px; color: var(--accent); }
 
+.side-scroll { flex: 1 1 0; min-height: 80px; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 18px; }
+.sidebar > .brand, .sidebar > .new-chat, .side-settings, .side-footer { flex-shrink: 0; }
+.sidebar { overflow-y: auto; }
+.side-scroll > .side-section { flex-shrink: 0; }
 .side-section { display: flex; flex-direction: column; gap: 8px; }
 .side-settings { gap: 9px; }
 .side-label {
@@ -268,7 +272,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .chat-search input::-webkit-search-cancel-button { opacity: .5; }
 .chat-list {
   display: flex; flex-direction: column; gap: 2px;
-  max-height: 30vh;
+  max-height: min(22vh, 180px);
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -1105,7 +1109,7 @@ html[data-theme="light"] .icon-moon { display: none; }
 .dialog-body { margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .dialog-field { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .dialog-field span { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
-.dialog-field input {
+.dialog-field input:not([type="checkbox"]):not([type="radio"]) {
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--line-strong);
@@ -1314,3 +1318,66 @@ html[data-theme="light"] .icon-moon { display: none; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* Document ingestion: a host-side task panel. */
+.ingest-open { width: 100%; justify-content: flex-start; border: 1px dashed var(--line-strong); background: var(--surface); }
+.ingest-open:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ingest-dialog { width: min(560px, calc(100vw - 24px)); padding: 0; overflow: hidden; }
+#ingest-form { display: flex; flex-direction: column; max-height: calc(90dvh - 2px); }
+.ingest-body { padding: 24px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ingest-heading { display: flex; align-items: flex-start; gap: 16px; }
+.ingest-heading > div { flex: 1; min-width: 0; }
+.ingest-heading h2 { margin: 0; font-size: 23px; }
+.ingest-heading p { margin: 8px 0 0; line-height: 1.6; }
+.ingest-heading .icon-btn { font-size: 24px; flex-shrink: 0; }
+.ingest-target { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-soft); font-size: 12px; }
+.ingest-target > span { color: var(--muted); flex-shrink: 0; }
+.ingest-target strong { overflow-wrap: anywhere; font-weight: 550; }
+.ingest-drop { display: flex; flex-direction: column; align-items: center; padding: 18px 12px; border: 1px dashed var(--line-strong); border-radius: 12px; background: var(--bg-soft); gap: 4px; }
+.ingest-drop.dragging { border-color: var(--accent); background: var(--accent-soft); }
+.ingest-drop > svg { width: 26px; height: 26px; color: var(--muted); }
+.ingest-drop > span, .ingest-drop small { color: var(--muted); font-size: 11px; }
+.ingest-drop .ghost { font-size: 13px; font-weight: 550; padding: 6px 10px; }
+.ingest-files { list-style: none; padding: 0; margin: 8px 0 0; max-height: 130px; overflow-y: auto; }
+.ingest-files li { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ingest-files li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ingest-files small { color: var(--muted); white-space: nowrap; }
+.ingest-files .icon-btn { flex-shrink: 0; width: 24px; height: 24px; }
+.ingest-modes { border: 0; margin: 18px 0 0; padding: 0; display: grid; gap: 7px; min-width: 0; }
+.ingest-modes legend { color: var(--ink-soft); font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.ingest-option { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+.ingest-option > span { min-width: 0; display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.ingest-option strong { color: var(--ink); font-size: 13px; font-weight: 550; display: flex; align-items: center; gap: 8px; }
+.ingest-option strong small { color: var(--muted); background: var(--surface-2); font-size: 10px; font-weight: 400; padding: 2px 5px; border-radius: 4px; }
+.ingest-option [data-ingest-reason]:empty { display: none; }
+.ingest-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.ingest-option:has(input:disabled) { opacity: .58; cursor: not-allowed; }
+.ingest-option input, .ingest-replace input { width: 15px; height: 15px; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--accent); }
+.ingest-replace { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 0; }
+.ingest-replace > span { display: grid; gap: 4px; }
+.ingest-replace strong { font-size: 12px; font-weight: 500; }
+.ingest-replace small { font-size: 11px; line-height: 1.5; color: var(--muted); }
+.ingest-environment { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; }
+.ingest-environment p { flex: 1; font-size: 11px; margin: 0; line-height: 1.5; }
+.ingest-environment .ghost { flex-shrink: 0; }
+.ingest-progress { margin: 14px 0 4px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-soft); }
+.ingest-progress-head { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; margin-bottom: 10px; font-size: 12px; }
+.ingest-progress-head strong { font-weight: 550; overflow-wrap: anywhere; }
+.ingest-progress-head > span { color: var(--muted); white-space: nowrap; }
+.ingest-list { margin-top: 10px; max-height: 200px; overflow-y: auto; font-size: 12px; }
+.ingest-list > div { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.ingest-list > div:last-child { border-bottom: 0; }
+.ingest-list small { color: var(--muted); line-height: 1.6; }
+.ingest-list .ok { color: var(--ok); }
+.ingest-list .failed, .ingest-dialog .dialog-error { color: var(--danger); }
+.ingest-dialog .dialog-error { overflow-wrap: anywhere; line-height: 1.6; }
+.ingest-dialog .dialog-actions { flex-shrink: 0; flex-wrap: wrap; margin: 0; padding: 14px 24px; border-top: 1px solid var(--line); }
+.ingest-dialog .dialog-actions .danger { margin-right: auto; }
+.ingest-dialog button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 520px) {
+  .ingest-dialog { max-height: calc(100dvh - 24px); }
+  #ingest-form { max-height: calc(100dvh - 26px); }
+  .ingest-body { padding: 18px; }
+  .ingest-dialog .dialog-actions { padding: 12px 18px; }
+  .ingest-heading h2 { font-size: 21px; }
+}

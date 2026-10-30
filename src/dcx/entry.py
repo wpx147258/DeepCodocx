@@ -14,6 +14,7 @@ import click
 
 from . import __version__
 from .assembly import BuildOptions, RuntimeBundle, build_runtime
+from .cli.ingest import docs as docs_group
 from .cli.repl import RichAsker, run_print, run_repl
 from .errors import DcxError
 
@@ -254,6 +255,9 @@ def main(ctx: click.Context, **common: Any) -> None:
     if ctx.invoked_subcommand is not None:
         return
     raise SystemExit(_run_repl(common))
+
+
+main.add_command(docs_group)
 
 
 @main.command("run")

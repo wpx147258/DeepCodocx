@@ -15,6 +15,7 @@ dependencies = [
     "rich>=13.7",
     "jsonschema>=4.22",
     "starlette>=0.37",
+    "pillow>=10",
     "uvicorn>=0.30",
 ]
 
