@@ -13,14 +13,16 @@ import html
 import json
 import re
 import shutil
-import subprocess
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+
+from .commands import run_command
 
 
 @dataclass
@@ -79,23 +81,14 @@ class _BBoxParser(HTMLParser):
             self._page = None
 
 
-def _run(command: list[str], *, timeout: int = 300) -> str:
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"{command[0]} failed: {result.stderr.strip()[:500]}")
+def _run(command: list[str], *, timeout: int = 300, cancelled: Callable[[], bool] | None = None) -> str:
+    result = run_command(command, timeout=timeout, cancelled=cancelled)
     return result.stdout
 
 
-def _pages_from_pdf(path: Path) -> list[Page]:
+def _pages_from_pdf(path: Path, cancelled: Callable[[], bool] | None = None) -> list[Page]:
     parser = _BBoxParser()
-    parser.feed(_run(["pdftotext", "-bbox", "-enc", "UTF-8", str(path), "-"]))
+    parser.feed(_run(["pdftotext", "-bbox", "-enc", "UTF-8", str(path), "-"], cancelled=cancelled))
     return parser.pages
 
 
@@ -155,13 +148,14 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 def convert(
-    pdf: Path, out_root: Path, *, dpi: int = 72, doc_id: str | None = None
+    pdf: Path, out_root: Path, *, dpi: int = 72, doc_id: str | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     doc_id = doc_id or f"paper_{hashlib.sha1(pdf.name.encode()).hexdigest()[:12]}"
     target = out_root / doc_id / "v1" / "basic"
     if target.is_dir() and (target / "manifest.json").is_file():
         return {"pdf": pdf.name, "doc_id": doc_id, "status": "skipped", "bundle": str(target)}
-    pages = _pages_from_pdf(pdf)
+    pages = _pages_from_pdf(pdf, cancelled)
     if not pages:
         raise RuntimeError("no pages from pdftotext")
     staging_parent = out_root / doc_id
@@ -177,7 +171,7 @@ def convert(
                 str(dpi),
                 str(pdf),
                 str(staging / "assets" / "pages" / "page"),
-            ]
+            ], cancelled=cancelled,
         )
         page_images = {
             int(path.stem.split("-")[-1]): path

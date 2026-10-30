@@ -194,6 +194,7 @@ class DocumentLibrary:
         self.scope = documents
         self._entries: dict[tuple[str, str, str], Rendition] | None = None
         self._units_cache: dict[Path, list[dict[str, Any]]] = {}
+        self._revision: str | None = None
 
     def reload(self) -> None:
         """Drop the in-memory manifest/unit caches after a build completes."""
@@ -217,6 +218,14 @@ class DocumentLibrary:
         return read_json(resolved)
 
     def entries(self) -> list[Rendition]:
+        revision_path = self.root / ".dcx-revision"
+        try:
+            revision = revision_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            revision = None
+        if revision != self._revision:
+            self.reload()
+            self._revision = revision
         if self._entries is None:
             self._entries = {}
             manifests = (
@@ -383,6 +392,7 @@ class DocumentLibrary:
             (entry.doc_id, entry.version): entry for entry in entries if entry.rendition == "basic"
         }
         indexed = False
+        indexed_keys: set[tuple[str, str]] = set()
         warnings = []
         db = self.root / "catalog.sqlite"
         if db.is_file() and db.resolve().is_relative_to(self.root) and not kind:
@@ -391,6 +401,13 @@ class DocumentLibrary:
                     sqlite3.connect(f"file:{quote(str(db))}?mode=ro", uri=True)
                 ) as connection:
                     connection.row_factory = sqlite3.Row
+                    db_modified = db.stat().st_mtime_ns
+                    indexed_keys = {
+                        (row["doc_id"], row["version"])
+                        for row in connection.execute("SELECT doc_id,version FROM docs")
+                        if (row["doc_id"], row["version"]) in basic
+                        and (basic[(row["doc_id"], row["version"])].path / "manifest.json").stat().st_mtime_ns <= db_modified
+                    }
                     match = " OR ".join('"' + term.replace('"', '""') + '"*' for term in terms)
                     sql = "SELECT u.*,bm25(units_fts) AS rank FROM units_fts JOIN units u ON u.unit_key=units_fts.unit_key WHERE units_fts MATCH ?"
                     params: list[Any] = [match]
@@ -402,7 +419,7 @@ class DocumentLibrary:
                     params.append(top_k * 3)
                     for row in connection.execute(sql, params):
                         entry = basic.get((row["doc_id"], row["version"]))
-                        if entry:
+                        if entry and (row["doc_id"], row["version"]) in indexed_keys:
                             unit = {
                                 "id": row["chunk_id"],
                                 "kind": row["kind"],
@@ -425,7 +442,7 @@ class DocumentLibrary:
                     f"Full-text index unavailable; lexical fallback: {type(exc).__name__}"
                 )
         for entry in entries:
-            if indexed and entry.rendition == "basic":
+            if indexed and entry.rendition == "basic" and (entry.doc_id, entry.version) in indexed_keys:
                 continue
             try:
                 units = self.units(entry)

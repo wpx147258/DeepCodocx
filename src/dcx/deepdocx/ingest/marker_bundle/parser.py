@@ -8,7 +8,6 @@ from __future__ import annotations
 import html
 import json
 import re
-import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -134,10 +133,13 @@ def _path_for(
     return tuple(values)
 
 
-def _render_pages(pdf_path: Path, work_dir: Path, dpi: int) -> dict[int, Path]:
+def _render_pages(
+    pdf_path: Path, work_dir: Path, dpi: int, *, cancelled: Callable[[], bool] | None = None,
+) -> dict[int, Path]:
+    from ..commands import run_command
     work_dir.mkdir(parents=True, exist_ok=True)
     prefix = work_dir / "page"
-    subprocess.run(
+    run_command(
         [
             "pdftoppm",
             "-png",
@@ -146,9 +148,8 @@ def _render_pages(pdf_path: Path, work_dir: Path, dpi: int) -> dict[int, Path]:
             str(pdf_path),
             str(prefix),
         ],
-        capture_output=True,
-        check=True,
         timeout=300,
+        cancelled=cancelled,
     )
     result = {}
     for path in sorted(work_dir.glob("page-*.png")):

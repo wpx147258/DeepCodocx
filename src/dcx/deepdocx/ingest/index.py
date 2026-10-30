@@ -6,7 +6,11 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import closing
 from pathlib import Path
+
+from .control import locked
+from .publish import notify_library
 
 
 def _schema(connection: sqlite3.Connection) -> None:
@@ -44,21 +48,48 @@ def _schema(connection: sqlite3.Connection) -> None:
 
 
 def build_basic_index(library_root: Path) -> dict[str, int]:
-    """Rebuild catalog.sqlite from all basic renditions atomically."""
+    """Administrative full rebuild, preserving the previous index on failure."""
+    return update_basic_index(library_root, None)
+
+
+def update_basic_index(library_root: Path, doc_ids: list[str] | None) -> dict[str, int]:
+    """Update only affected Basic documents; bootstrap all if no index exists."""
+    with locked(library_root / ".dcx-index.lock"):
+        return _update(library_root, doc_ids)
+
+
+def _update(library_root: Path, doc_ids: list[str] | None) -> dict[str, int]:
+    target = library_root / "catalog.sqlite"
+    incremental = target.is_file() and doc_ids is not None
     manifests = sorted(library_root.glob("*/v*/basic/manifest.json"))
-    if not manifests:
-        return {"documents": 0, "units": 0}
+    if incremental:
+        manifests = [path for path in manifests if path.parents[2].name in (doc_ids or [])]
     temp = library_root.parent / f".catalog-{uuid.uuid4().hex}.sqlite"
     documents = units = 0
     try:
-        with sqlite3.connect(str(temp)) as connection:
+        with closing(sqlite3.connect(str(temp))) as connection:
+            if incremental:
+                with closing(
+                    sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True)
+                ) as existing:
+                    existing.backup(connection)
             _schema(connection)
+            if incremental:
+                for doc_id in doc_ids or []:
+                    connection.execute(
+                        "DELETE FROM units_fts WHERE unit_key IN (SELECT unit_key FROM units WHERE doc_id=?)",
+                        (doc_id,),
+                    )
+                    connection.execute("DELETE FROM units WHERE doc_id=?", (doc_id,))
+                    connection.execute("DELETE FROM docs WHERE doc_id=?", (doc_id,))
             for manifest_path in manifests:
                 try:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                     doc = manifest["doc"]
                 except (OSError, json.JSONDecodeError, KeyError, TypeError):
-                    continue
+                    raise ValueError(
+                        f"Cannot index invalid Basic manifest: {manifest_path}"
+                    ) from None
                 doc_id = str(doc["doc_id"])
                 version = str(doc.get("version") or "v1")
                 title = str(doc.get("title") or doc_id)
@@ -72,7 +103,7 @@ def build_basic_index(library_root: Path) -> dict[str, int]:
                 documents += 1
                 chunks_path = manifest_path.parent / "chunks.jsonl"
                 if not chunks_path.is_file():
-                    continue
+                    raise ValueError(f"Missing chunks: {chunks_path}")
                 for line in chunks_path.read_text(encoding="utf-8").splitlines():
                     if not line.strip():
                         continue
@@ -80,10 +111,11 @@ def build_basic_index(library_root: Path) -> dict[str, int]:
                         chunk = json.loads(line)
                         chunk_id = str(chunk["chunk_id"])
                     except (json.JSONDecodeError, KeyError, TypeError):
-                        continue
+                        raise ValueError(f"Invalid chunk in {chunks_path}") from None
                     unit_key = f"{doc_id}:{version}:{chunk_id}"
                     page_range = chunk.get("page_range") or [1, 1]
-                    assert isinstance(page_range, list) and len(page_range) >= 2
+                    if not isinstance(page_range, list) or len(page_range) != 2:
+                        raise ValueError(f"Invalid page range in {chunks_path}")
                     bbox = chunk.get("bbox")
                     labels = " ".join(str(item) for item in chunk.get("labels", []))
                     heading = " ".join(str(item) for item in chunk.get("heading_path", []))
@@ -111,7 +143,8 @@ def build_basic_index(library_root: Path) -> dict[str, int]:
                     )
                     units += 1
             connection.commit()
-        os.replace(temp, library_root / "catalog.sqlite")
+        os.replace(temp, target)
+        notify_library(library_root)
     finally:
         if temp.exists():
             temp.unlink(missing_ok=True)

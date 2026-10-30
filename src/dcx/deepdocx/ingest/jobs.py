@@ -7,13 +7,17 @@ uploaded source paths, mode, progress and errors; the worker mutates one job.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ...atomic import atomic_write_text
+from .control import locked
 from .identity import doc_id_for_name, sanitize_filename, sha256_bytes
 
 PDF_MAGIC = b"%PDF-"
@@ -30,7 +34,7 @@ class JobStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _dir(self, job_id: str) -> Path:
-        if not job_id or "/" in job_id or "\\" in job_id:
+        if not re.fullmatch(r"[a-f0-9]{12}", job_id):
             raise ValueError("Invalid job id")
         return self.root / job_id
 
@@ -75,7 +79,9 @@ class JobStore:
         jobs = []
         for path in self.root.glob("*/job.json"):
             try:
-                jobs.append(json.loads(path.read_text(encoding="utf-8")))
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("id") == path.parent.name:
+                    jobs.append(data)
             except (OSError, json.JSONDecodeError):
                 continue
         return sorted(jobs, key=lambda item: str(item.get("created_at", "")), reverse=True)
@@ -88,45 +94,88 @@ class JobStore:
         )
 
     def update(self, job_id: str, **changes: Any) -> dict[str, Any]:
-        job = self.get(job_id)
-        job.update(changes)
-        self.write(job)
+        with self.edit(job_id) as job:
+            job.update(changes)
         return job
 
-    def add_file(self, job_id: str, name: str, data: bytes, *, max_bytes: int) -> dict[str, Any]:
-        if len(data) > max_bytes:
+    @contextmanager
+    def edit(self, job_id: str) -> Iterator[dict[str, Any]]:
+        # A separate lock file survives atomic replacements of job.json.
+        with locked(self._dir(job_id) / "state.lock"):
+            job = self.get(job_id)
+            original = json.dumps(job, sort_keys=True)
+            yield job
+            if json.dumps(job, sort_keys=True) != original:
+                self.write(job)
+
+    def add_file(
+        self,
+        job_id: str,
+        name: str,
+        data: bytes | Path,
+        *,
+        max_bytes: int,
+        max_files: int = 50,
+    ) -> dict[str, Any]:
+        with self.edit(job_id) as job:
+            return self._add_file(job, name, data, max_bytes=max_bytes, max_files=max_files)
+
+    def _add_file(
+        self,
+        job: dict[str, Any],
+        name: str,
+        data: bytes | Path,
+        *,
+        max_bytes: int,
+        max_files: int,
+    ) -> dict[str, Any]:
+        size = data.stat().st_size if isinstance(data, Path) else len(data)
+        if size > max_bytes:
             raise ValueError(f"File exceeds the {max_bytes // (1024 * 1024)} MiB limit")
-        if not data.startswith(PDF_MAGIC):
+        if isinstance(data, Path):
+            with data.open("rb") as handle:
+                magic = handle.read(5)
+        else:
+            magic = data[:5]
+        if magic != PDF_MAGIC:
             raise ValueError("Only PDF uploads are supported in this version")
         safe = sanitize_filename(name)
         if not safe.lower().endswith(".pdf"):
             safe += ".pdf"
-        job = self.get(job_id)
-        if job.get("status") not in {"uploading", "queued"}:
+        job_id = job["id"]
+        if job.get("status") != "uploading":
             raise ValueError("This job is no longer accepting uploads")
         files = job.setdefault("files", [])
-        digest = sha256_bytes(data)
+        from .identity import sha256_file
+
+        digest = sha256_file(data) if isinstance(data, Path) else sha256_bytes(data)
         if any(item.get("sha256") == digest for item in files):
             return job
+        if len(files) >= max_files:
+            raise ValueError(f"At most {max_files} files are allowed")
+        if any(item.get("doc_id") == doc_id_for_name(safe) for item in files):
+            raise ValueError("Different PDFs have the same filename; rename one before uploading")
         upload_id = f"{len(files) + 1:03d}"
         upload_dir = self._dir(job_id) / "uploads" / upload_id
         upload_dir.mkdir(parents=True, exist_ok=True)
         stored = upload_dir / safe
-        stored.write_bytes(data)
+        if isinstance(data, Path):
+            shutil.copyfile(data, stored)
+        else:
+            stored.write_bytes(data)
         files.append(
             {
                 "upload_id": upload_id,
                 "name": safe,
                 "stored": str(stored),
                 "sha256": digest,
-                "size": len(data),
+                "size": size,
                 "doc_id": doc_id_for_name(safe),
                 "status": "uploaded",
                 "modes": {},
                 "error": "",
             }
         )
-        self.write(job)
         return job
 
     def remove_uploads(self, job_id: str) -> None:

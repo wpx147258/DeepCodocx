@@ -77,9 +77,12 @@ def write_pdf_bundle(
     doc_id: str | None = None,
     title: str | None = None,
     license: str | None = None,
+    source_version: str | None = None,
 ) -> Path:
     source_sha = parsed.source_sha256
-    version = f"v_{source_sha[:16]}"
+    version = source_version or f"v_{source_sha[:16]}"
+    if re.fullmatch(r"[A-Za-z0-9_-]+", version) is None:
+        raise BundleError("invalid source version")
     doc_id = doc_id or f"pdf_{source_sha[:12]}"
     if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", doc_id) is None:
         raise BundleError(f"invalid doc_id: {doc_id}")

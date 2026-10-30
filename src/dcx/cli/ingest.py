@@ -38,16 +38,23 @@ def ingest(
     if not library.root.is_dir():
         raise click.ClickException("Document library directory is unavailable")
     service = IngestService(config.paths, config.ingest)
-    job = service.create_job(library.id, library.root, mode, force=force)
+    job = None
     try:
+        job = service.create_job(library.id, library.root, mode, force=force)
         for source in sources:
-            service.add_file(job["id"], source.name, source.read_bytes())
+            service.add_file(job["id"], source.name, source)
         service.start(job["id"])
         result = service.wait(job["id"])
     except (ValueError, OSError, RuntimeError, TimeoutError) as exc:
+        if job is not None:
+            service.cancel(job["id"])
         raise click.ClickException(str(exc)) from exc
+    except KeyboardInterrupt:
+        if job is not None:
+            service.cancel(job["id"])
+        raise
     click.echo(json.dumps(result, ensure_ascii=False, indent=2))
-    raise SystemExit(0 if result.get("status") in {"succeeded", "partial"} else 1)
+    raise SystemExit(0 if result.get("status") == "succeeded" else 1)
 
 
 @docs.command("jobs")
@@ -81,4 +88,3 @@ def list_docs(library_path: Path, config_path: Path | None) -> None:
     load_config(config_path)
     library = DocumentLibrary(library_path)
     click.echo(json.dumps(library.documents(), ensure_ascii=False, indent=2))
-

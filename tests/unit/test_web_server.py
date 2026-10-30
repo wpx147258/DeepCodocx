@@ -494,6 +494,8 @@ async def test_token_protects_api_but_not_the_page(tmp_path: Path) -> None:
 
         denied = await client.get("/api/bootstrap")
         assert denied.status_code == 401
+        assert (await client.get("/api/ingest/environment")).status_code == 401
+        assert (await client.post("/api/ingest/jobs", json={})).status_code == 401
         wrong = await client.get(
             "/api/bootstrap", headers={"X-DCX-Token": "nope"}
         )
@@ -503,6 +505,9 @@ async def test_token_protects_api_but_not_the_page(tmp_path: Path) -> None:
             "/api/bootstrap", headers={"X-DCX-Token": "secret-token"}
         )
         assert allowed.status_code == 200
+        assert (await client.get(
+            "/api/ingest/environment", headers={"X-DCX-Token": "secret-token"}
+        )).status_code == 200
         legacy = await client.get(
             "/api/bootstrap", headers={"X-CLI-Agent-Token": "secret-token"}
         )

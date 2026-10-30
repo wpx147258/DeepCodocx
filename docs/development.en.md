@@ -26,11 +26,17 @@ fixtures and require neither a personal corpus nor an API key.
 ```bash
 uv run --with playwright python -m playwright install chromium
 uv run --with playwright python -m tests.e2e.web_smoke --output /tmp/deepcodocx-browser
+uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodocx-ingest
 ```
 
 This check uses a scripted provider with the real Web server, stdio MCP, and
 browser. It covers legacy browser preference migration, default libraries, remembered selection, fork/new, search,
 images, citations, session isolation, and narrow layouts.
+
+Ingestion acceptance requires Poppler. It uses a tiny PDF with a real upload,
+independent worker, and index, checks sidebar/mobile layouts and option/task
+states, and asserts zero model calls or transcript changes. See the
+[ingestion guide](deepdocx-ingest.en.md).
 
 Screenshots in the output directory support visual inspection. Add
 `--library /path/to/paper-bundles` to check a real local corpus containing
