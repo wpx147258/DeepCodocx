@@ -77,6 +77,47 @@ default_library = "/path/to/paper-bundles"
 没有配置或保存的库时，会发现附近的 `deep-docs-unified/data`。
 更详细的格式和文档范围说明见 [DeepDocx 指南](deepdocx.md)。
 
+## 多模态语义索引
+
+索引服务与对话 provider 分开配置。`--provider`／`--model` 选择回答模型，不会改变
+embedding 或 caption 模型。以下为常用项，完整默认值见[索引指南](multimodal-index.md)
+与 [config.example.toml](../config.example.toml)：
+
+```toml
+[deepdocx.index]
+protocol = "dashscope"
+enabled = true
+auto_sync = false
+model = "qwen3-vl-embedding"
+api_key_env = "DASHSCOPE_API_KEY"
+dimensions = 2560
+joint_protocol = "dashscope"
+joint_model = "qwen3-vl-embedding"
+joint_key_env = "DASHSCOPE_API_KEY"
+joint_dimensions = 2560
+
+[deepdocx.caption]
+enabled = true
+model = "qwen3.8-flash"
+api_key_env = "GITEE_API_KEY"
+```
+
+`enabled` 允许使用语义能力，不代表已经构建索引。默认 `auto_sync=false`，避免仅设置
+服务密钥就触发全库推理。某库首次手动同步后会保存该库的自动同步偏好，新入库后
+按此偏好排队；库内保存的偏好优先于全局 `auto_sync`。外部复制文件仍需手动同步。
+
+索引面板按库保存是否生成描述及所选模型，也可用 `docs index sync --no-captions`
+保存不生成描述的选择。这些偏好优先于相应 TOML 默认值。关闭生成描述仍可编码
+原图注；关闭整个语义能力可设置 `[deepdocx.index] enabled=false`，关键词工具继续可用。
+
+服务密钥使用所配置的环境变量名，从启动进程的环境读取；修改后重启服务。
+默认独立与联合编码均使用百炼 2560 维，描述生成单独走 Gitee。独立编码可用
+`protocol="gitee"` 并配套 Gitee 端点、模型和密钥名切换备用；完整示例见索引指南。
+切换后同步所选论文，不会自动混用旧服务向量。Web 支持搜索并选择单篇，CLI 使用
+`docs index sync --doc DOC_ID`；新入库自动同步仅处理本次发布过的文档。
+服务状态中的“已配置”只检查配置与密钥存在，实际请求结果以任务／查询错误为准。
+索引数据库位于 `$XDG_DATA_HOME/dcx/semantic/<library-id>/`，不会写入 bundle。
+
 ## MCP
 
 通用 MCP 客户端支持本地 stdio。命令来自配置，具体 schema 通过发现工具按需返回。

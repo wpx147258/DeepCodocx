@@ -1,4 +1,4 @@
-"""Local document MCP service. Reads bundles; never runs a model or parses PDFs."""
+"""Local document MCP service. Reads evidence; no answering model or PDF parsing."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from typing import Any
 
 from jsonschema import validate
 
+from ..session.attachments import AttachmentStore
 from .library import DocumentLibrary
+from .semantic.engine import SemanticEngine
+from .semantic.tools import SCHEMAS as SEMANTIC_TOOLS
+from .semantic.tools import call as semantic_call
 
 GUIDE = """DeepDocx document workflow (reference guidance; permissions and the current user request take precedence):
 For paper concepts, pasted excerpts and figures, first try a cheap lookup in the selected library.
@@ -88,17 +92,25 @@ TOOLS = [
 
 
 class DocumentServer:
-    def __init__(self, library: DocumentLibrary) -> None:
+    def __init__(self, library: DocumentLibrary, semantic: SemanticEngine | None=None, allowed_roots: tuple[Path,...]=(), attachments: AttachmentStore | None=None) -> None:
         self.library = library
+        self.semantic=semantic
+        self.allowed_roots=(library.root,*allowed_roots)
+        self.attachments = attachments
+        self.tools=TOOLS+SEMANTIC_TOOLS if semantic is not None else TOOLS
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         data: dict[str, Any]
-        tool = next((tool for tool in TOOLS if tool["name"] == name), None)
+        tool = next((tool for tool in self.tools if tool["name"] == name), None)
         if tool is None:
             raise ValueError("Unknown document tool")
         validate(arguments, tool["inputSchema"])
-        if name == "doc_guide":
+        if name in {'doc_semantic_search','doc_index_status'} and self.semantic is not None:
+            data=semantic_call(self.semantic,name,arguments,self.allowed_roots,self.attachments)
+        elif name == "doc_guide":
             data = {"guide": GUIDE, "root": str(self.library.root)}
+            if self.semantic is not None:
+                data['guide']=GUIDE.replace('Image embeddings and semantic vector search are not installed in this version. Do not claim to have used them.','Optional semantic indexes are available through doc_semantic_search(query, image_ref, target=auto/text/image, top_k=5). For paraphrased concepts try text semantic lookup; for an uploaded image use its attachment: reference from host context, optionally combined with the user question. Library doc: image locators also work as image_ref. target controls what evidence to find, not a task planner. Results contain a few source cards, snippet_source, and coverage with indexed paper names; they contain no image pixels. Read originals with doc_read/doc_view. Check doc_index_status only when additional coverage details are needed; absent or unindexed sources still support keyword/native tools. Generated descriptions are derived data, not source quotations. Standalone and native fusion use configured services (DashScope by default). Never start index/build/caption tasks through tools.')
         elif name == "doc_library":
             data = {"documents": self.library.documents(arguments.get("query", ""))[:200]}
             for doc in data["documents"]:
@@ -145,7 +157,7 @@ class DocumentServer:
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {"tools": TOOLS}
+            result = {"tools": self.tools}
         elif method == "tools/call":
             params = request.get("params") or {}
             try:
@@ -168,8 +180,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--doc", action="append", default=[])
+    parser.add_argument('--semantic-settings',type=Path)
+    parser.add_argument('--workspace',type=Path,default=Path.cwd())
+    parser.add_argument('--session-root', type=Path)
     args = parser.parse_args()
-    server = DocumentServer(DocumentLibrary(args.root, tuple(args.doc)))
+    library=DocumentLibrary(args.root,tuple(args.doc))
+    semantic=None
+    roots: tuple[Path,...]=(args.workspace,)
+    if args.semantic_settings:
+        from .semantic.settings import parse_settings
+        raw=json.loads(args.semantic_settings.read_text())
+        index,caption=parse_settings(raw['index'],raw['caption'])
+        semantic=SemanticEngine(library,Path(raw['data_dir']),index,caption)
+    if args.session_root:
+        roots=(*roots,args.session_root)
+    attachments = AttachmentStore(args.session_root) if args.session_root else None
+    server = DocumentServer(library,semantic,roots,attachments)
     for line in sys.stdin:
         try:
             request = json.loads(line)

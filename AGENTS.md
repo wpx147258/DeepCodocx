@@ -13,6 +13,25 @@
 - The CLI owns input and rendering only. It must never append to the transcript, mutate
   the model, or count usage.
 - Runtime state lives under XDG data directories. Do not write state into the project.
+- DeepDocx ingestion and semantic-index workers are system services outside the
+  agent runtime. They must not create agent turns, edit transcripts, or expose
+  index/build/caption write operations as model tools. Runtime dependency wiring
+  remains in `assembly.py`; system job services own their separate worker lifecycle.
+- Bundles are source evidence. Keep generated captions, vectors, input hashes, and
+  index jobs in the XDG derivative store. Preserve original locators and bundle
+  checksums. Filter missing, stale, and out-of-scope sources at query time.
+- Default all embedding representations to DashScope qwen3-vl-embedding at 2560
+  dimensions; Gitee standalone encoding is an explicit backup configuration and
+  Gitee captions remain independent. Isolate provider profiles, encode queries
+  per channel, and combine rankings; never mix models or replace native fusion
+  with averaged vectors. Selective sync must preserve unselected documents;
+  ingestion-triggered sync processes only documents published by that job.
+- Chat image references belong to the current session's attachments store.
+  Add them through the generic context callback wired in assembly; preserve
+  original messages and the complete system/tool prefix. MCP accepts image_ref
+  with target=auto/text/image and returns bounded source cards plus coverage.
+  Looking up candidates does not return image pixels or start index/build jobs;
+  source reading and image inspection remain explicit agent tool choices.
 
 ## Rules
 

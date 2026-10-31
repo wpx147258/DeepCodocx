@@ -111,10 +111,12 @@ class WebHost:
         factory: BundleFactory | None = None,
     ) -> None:
         from ..deepdocx.ingest import IngestService
+        from ..deepdocx.semantic.service import IndexService
 
         self.bundle = bundle
         self.runtime = bundle.runtime
-        self.ingest = IngestService(bundle.config.paths, bundle.config.ingest)
+        self.ingest = IngestService(bundle.config.paths, bundle.config.ingest,index=bundle.config.index,caption=bundle.config.caption,env=bundle.options.env)
+        self.indexes = IndexService(bundle.config.paths.data_dir,bundle.config.index,bundle.config.caption,bundle.options.env)
         self._factory = factory
         self._turn: asyncio.Task[None] | None = None
         self._queue: asyncio.Queue[Any] | None = None
@@ -1092,10 +1094,12 @@ def create_app(
         Mount("/static", StaticFiles(directory=STATIC_DIR), name="static"),
     ]
     from .documents import document_routes
+    from .indexes import index_routes
     from .ingest import ingest_routes
 
     routes.extend(document_routes(host, asker))
     routes.extend(ingest_routes(host))
+    routes.extend(index_routes(host))
     app = Starlette(
         routes=routes,
         lifespan=lifespan,

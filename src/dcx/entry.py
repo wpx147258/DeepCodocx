@@ -14,6 +14,7 @@ import click
 
 from . import __version__
 from .assembly import BuildOptions, RuntimeBundle, build_runtime
+from .cli import indexes as _indexes  # noqa: F401 - registers document index commands
 from .cli.ingest import docs as docs_group
 from .cli.repl import RichAsker, run_print, run_repl
 from .errors import DcxError

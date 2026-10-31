@@ -7,7 +7,7 @@
 在 DeepCodocx 中使用现有 provider 配置：
 
 ```bash
-uv sync --extra dev
+uv sync
 uv run dcx web
 ```
 
@@ -59,9 +59,38 @@ default_library = "/path/to/deep-docs-unified/data"
 `normal`。库的选择不改变 cwd，不加载库中的 AGENTS.md，也不把文档任务规则写入
 用户的 Remember 记忆。
 
-源 bundle 和已有 SQLite 索引只读访问。数据目录没有可用索引时退回词法扫描，不在
-交互请求中重建源索引。目录中尚未完成的产物和未知 schema 会被略过。
-会话内使用已发现的目录快照；转换过程中新增的产物可通过新建文档会话载入。
+文档读取工具只读访问源 bundle 与已有全文目录。没有可用全文目录时退回词法扫描，
+不在交互请求中重建它。目录中尚未完成的产物和未知 schema 会被略过。
+通过 Web／CLI 入库后，库版本通知会让 Web 与已运行的 MCP 在下一次读取时刷新缓存。
+会话已限定文档范围时，新文档不会自动加入该范围；切换范围需创建新会话或 fork。
+外部直接复制的 bundle 可通过新建文档会话重新发现，语义索引需手动同步。
+
+## 多模态语义定位
+
+已有文档库可以直接构建索引，无需重新解析 PDF。索引管理按四类展示能力：
+
+| 索引类别 | 内容 | 使用场景 |
+|---|---|---|
+| 正文块 | Marker 段落／列表，或按版面合并的 Basic 文本行 | 解释概念、按语义定位段落 |
+| 图像自身 | 图表裁图；只有 Basic 时使用页面图 | 以图搜图、按文字寻找图示 |
+| 图注与生成描述 | 原图注和视觉模型描述分别保存 | 按图注或图像内容描述定位 |
+| 原生图文联合 | 图像＋原图注、图像＋生成描述 | 同时利用图像与文字线索 |
+
+在启动 Web 的终端配置 `GITEE_API_KEY` 与 `DASHSCOPE_API_KEY` 后，进入 DeepDocx，
+点击文档库旁的 **索引管理**。按标题搜索并勾选论文，选择是否生成描述及描述模型，
+再点击 **同步索引**。也可显式选择整个文档库；单篇同步不影响其它论文已有索引。
+首次手动同步为当前库启用后续入库自动同步；仅设置密钥不会自动构建全部语料。
+同步和生成描述属于独立后台任务，进度不写入对话。可以关闭面板后继续提问。
+
+在面板的 **试用语义检索** 中输入文字、上传图片，或同时提供两者；点击结果打开
+原文／原图。该预览用于直接试查，不会创建 Agent 回合。对话中的 Agent 则按需发现
+语义工具，继续自行组合关键词、Bash、Read 和图片读取。
+
+默认独立编码与原生联合编码均使用百炼 `qwen3-vl-embedding`，均为 2560 维；
+Gitee 可显式配置为独立编码备用，图片描述仍使用 Gitee。查询通道分别编码后按排名融合。
+没有可用或当前索引时，语义工具会
+返回明确提示，Agent 可继续关键词定位；不会在一次提问中自动启动建库。
+完整配置、同步规则及 caption 来源说明见[多模态索引](multimodal-index.md)。
 
 ## 固定工具与 MCP
 
@@ -106,15 +135,43 @@ NOTES_PATH = "/path/to/notes"
 | documents.doc_read | 读原文、邻接单元或整页 | locator、neighbors≤20、max_chars≤16000 |
 | documents.doc_view | 返回实际页面/图表图片与来源 | locator |
 | documents.doc_guide | 按需加载详细操作指南 | 无 |
+| documents.doc_index_status | 查看当前库／会话范围内的语义索引覆盖与状态 | 无 |
+| documents.doc_semantic_search | 按文字、图片或图文定位证据 | query、image_ref、target=auto/text/image、doc、top_k（默认 5，最多 20） |
 
 普通 Bash、Read、Grep 仍可组合使用。指南解释两种 bundle 的文件结构，agent 可以直接
 读已有图片，不用再次解析 PDF。工具不规划任务，不使用另一个回答模型。
+
+语义工具通过宿主配置接入，具体可用项以 `DiscoverTools` 返回为准。例如先发现
+`document semantic search index status`，再调用：
+
+```json
+{"name":"CallExternalTool","input":{"tool":"documents.doc_semantic_search","arguments":{"query":"记忆模块如何连接动作预测","target":"text","top_k":5}}}
+```
+
+`query` 与图片至少提供一种。聊天上传图片会获得 `attachment:...` 稳定引用，宿主把它
+加入消息上下文，模型可直接传为 `image_ref`；库内图像也可用完整 `doc:...` 定位符。
+`target=auto` 对纯文字查询定位正文／图注，对图片查询定位图像／原生图文；`text`
+只查正文块，`image` 查图像相关表征。工具不替模型规划后续任务。
+
+默认返回最多 5 条紧凑来源卡片及 `coverage`，包括实际可检索的论文名称，避免把未建
+索引的论文误判为无相关内容。结果不附图片像素或整段正文，需要用 `doc_read`／
+`doc_view` 核对。生成描述通过 `snippet_source` 和生成来源标记区分。
+旧参数 `image_locator`／`image_path` 与高级 `representations` 仍兼容；三种图片输入
+互斥，显式 `target=text/image` 不与高级表征过滤同时使用。图片路径限于所选文档库、
+工作区或当前会话，不接受远程 URL。
+
+附件文件保存在当前会话的 `attachments/`，恢复会话与 fork 后保持引用可用；原始消息
+与历史记录不被改写。侧栏“语义索引 x/y”可查看覆盖，对话工具卡直接展示命中片段和
+来源按钮，原始 JSON 可展开查看。
 
 文档服务可以单独运行，便于其他 MCP 客户端使用：
 
 ```bash
 python -m dcx.deepdocx.server --root /path/to/paper-bundles
 ```
+
+上面的独立命令默认提供基础文档工具；dcx 宿主会另外传入无密钥的语义服务设置。
+其它客户端接入语义能力的方式见[索引指南](multimodal-index.md)。
 
 ## 来源与异构产物
 
@@ -135,6 +192,9 @@ basic 单元是行级文本，应读邻接行/整页；Marker 单元保留 parag
 equation 等类型。FTS5 用于已有 basic 索引，Marker 使用词法定位。原始图注可能缺失，
 图像与数学公式仍需模型读取原图验证。没有图表 crop 时使用所在页面。
 
+语义文本块不会改变这些原始单元：每块保留全部来源 locator、标题、章节及 bbox。
+图注／联合检索返回的来源仍指向原图与原文，caption 的生成模型和输入来源另行记录。
+
 这些定位符属于本项目的文档 MCP 接口。接入其他服务时，应采用其返回的实际 schema。
 
 ## 会话与界面行为
@@ -150,10 +210,10 @@ equation 等类型。FTS5 用于已有 basic 索引，Marker 使用词法定位�
 
 ## 当前能力边界
 
-向量搜索、图像相似检索、生成 caption、语义块索引、远程 MCP 和多用户未在本版本实现。
-PDF 入库由独立的系统任务完成（见 [文档入库](deepdocx-ingest.md)），不是 Agent 工具。
-上传图片仍可使用现有视觉模型先提取文字，再调用关键词定位；无文字的图片需要模型利用
-可用线索查找，或等待后续向量工具。系统不会声称已经做了向量检索。
+可选的语义文本块、图像、caption 和原生图文联合索引已接入，见[多模态索引](multimodal-index.md)。
+Agent 可以按需发现 doc_index_status / doc_semantic_search；没有当前索引时继续使用关键词和原生文件工具。
+生成描述明确标记来源，不能作为论文原文引用。PDF 入库和索引写入由独立系统任务完成，
+不暴露为模型写工具。远程 MCP 和多用户仍在后续范围。
 
 模型必须实际支持图片输入才能分析图像；只读元数据或在浏览器看到图片不代表模型已
 看到图片。联网能力也取决于是否配置了真实可调用的外部工具。

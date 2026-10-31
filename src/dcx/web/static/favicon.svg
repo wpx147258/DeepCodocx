@@ -1,4 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#b4552f"/>
-  <path d="M32 13v38M16.7 22.5l30.6 19M47.3 22.5l-30.6 19" fill="none" stroke="#fffaf6" stroke-width="4.2" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+  <style>
+    :root { --logo-bg: #fdfcfa; --logo-night: #0a284b; --logo-dawn: #8aa2bc; --logo-sun: #f5a000; }
+    @media (prefers-color-scheme: dark) {
+      :root { --logo-bg: #1e2125; --logo-night: #a9c3e2; --logo-dawn: #5e7c9e; --logo-sun: #ffbb45; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="dox-orbit" gradientUnits="userSpaceOnUse" x1="14" y1="36" x2="60" y2="36">
+      <stop offset="0" stop-color="var(--logo-night, #0a284b)"/>
+      <stop offset=".42" stop-color="var(--logo-night, #0a284b)"/>
+      <stop offset=".76" stop-color="var(--logo-sun, #f5a000)"/>
+      <stop offset="1" stop-color="var(--logo-sun, #f5a000)"/>
+    </linearGradient>
+    <linearGradient id="dox-twilight" gradientUnits="userSpaceOnUse" x1="15" y1="14" x2="15" y2="56">
+      <stop offset="0" stop-color="var(--logo-night, #0a284b)"/>
+      <stop offset=".45" stop-color="var(--logo-night, #0a284b)"/>
+      <stop offset="1" stop-color="var(--logo-dawn, #8aa2bc)"/>
+    </linearGradient>
+  </defs>
+  <rect width="72" height="72" rx="19" fill="var(--logo-bg)"/>
+  <g transform="translate(7.2 7.2) scale(.8)">
+    <path d="M15 14C37 4 59 16 60 36C58 57 37 66 15 56"
+          fill="none" stroke="url(#dox-orbit)" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M15 56C8 43 8 28 15 14"
+          fill="none" stroke="url(#dox-twilight)" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="15" cy="14" r="6.5" fill="var(--logo-night, #0a284b)"/>
+    <circle cx="15" cy="56" r="6.5" fill="var(--logo-dawn, #8aa2bc)"/>
+    <circle cx="60" cy="36" r="5.9" fill="var(--logo-sun, #f5a000)"/>
+  </g>
 </svg>

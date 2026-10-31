@@ -7,7 +7,7 @@
 Use your existing provider configuration in DeepCodocx:
 
 ```bash
-uv sync --extra dev
+uv sync
 uv run dcx web
 ```
 
@@ -72,11 +72,49 @@ append-only session records. Older sessions default to `normal`. Selecting a
 library does not change the coding working directory, load the library's
 AGENTS.md, or save mode instructions through Remember.
 
-Source bundles and existing SQLite indexes are accessed read-only. An absent
-index falls back to lexical scanning; interactive requests do not rebuild the
-source index. Incomplete bundles and unsupported schemas are skipped. A session
-uses a snapshot of the discovered directory; create a new document session to
-pick up newly converted bundles.
+Document tools access source bundles and existing full-text catalogs read-only.
+An absent catalog falls back to lexical scanning; interactive requests do not
+rebuild it. Incomplete bundles and unsupported schemas are skipped. Web/CLI
+ingestion publishes a library revision, allowing Web readers and running MCP
+processes to refresh on their next read. A restricted session keeps its document
+scope; start a new session or fork to include documents outside it. For bundles
+copied externally, a new document session rediscovers the files, while the
+semantic index needs a manual sync.
+
+## Multimodal semantic lookup
+
+Index an existing library without parsing its PDFs again. Index management groups
+the representations into four families:
+
+| Index family | Contents | Typical use |
+|---|---|---|
+| Text blocks | Marker paragraphs/lists, or Basic lines grouped by layout | Locate passages and explain concepts |
+| Images | Figure/table crops; page images for Basic-only sources | Image queries or finding diagrams by text |
+| Captions and descriptions | Original captions and generated visual descriptions, stored separately | Locate figures by caption or described content |
+| Native image–text combinations | Image + original caption, image + generated description | Combine visual and textual clues |
+
+Set `GITEE_API_KEY` and `DASHSCOPE_API_KEY` in the terminal launching Web, enter
+DeepDocx, and open **索引管理** (Index management) beside the library. Choose
+which papers to synchronize using the searchable selection, then choose whether
+to generate descriptions and select their model. Full-library synchronization
+is an explicit option; a single-paper job preserves other indexed papers.
+The first manual sync enables synchronization after future ingestion for that
+library. Credentials alone do not trigger a full build. Indexing and description
+generation run in independent background jobs without adding chat messages;
+you can close the panel and continue the conversation.
+
+Use **试用语义检索** (Try semantic search) for text, image, or mixed queries and
+open a result's source text/image. This preview does not create an agent turn.
+In conversation, the agent discovers semantic tools on demand and continues to
+combine keyword lookup, Bash, Read, and image reading itself.
+
+DashScope `qwen3-vl-embedding` handles both independent and native joint encoding
+at 2560 dimensions by default. Gitee provides descriptions and an explicit backup
+standalone encoder configuration. Query channels are encoded separately and
+rankings are fused. Missing or stale indexes produce explicit guidance;
+the agent can use keyword lookup without starting an index build during a turn.
+See [multimodal indexes](multimodal-index.en.md) for configuration, synchronization,
+and caption provenance.
 
 ## Fixed tool entries and MCP
 
@@ -127,17 +165,52 @@ The name `documents` is reserved for the selected document library.
 | `documents.doc_read` | Read a source unit, its neighbors, or a page | `locator`, `neighbors` ≤ 20, `max_chars` ≤ 16000 |
 | `documents.doc_view` | Return an actual page or figure image with its source | `locator` |
 | `documents.doc_guide` | Load detailed workflow guidance on demand | None |
+| `documents.doc_index_status` | Inspect semantic coverage and availability for the library/session scope | None |
+| `documents.doc_semantic_search` | Locate evidence with text, an image, or both | `query`, `image_ref`, `target=auto/text/image`, `doc`, `top_k` (default 5, maximum 20) |
 
 Native Bash, Read, and Grep can be combined with these tools. The guide explains
 both bundle layouts so the agent can inspect existing images without parsing
 the PDF again. The document tools return evidence; planning and answering
 remain with the main agent.
 
+Semantic tools are connected through host configuration; use the actual list
+returned by `DiscoverTools`. For example, discover
+`document semantic search index status`, then call:
+
+```json
+{"name":"CallExternalTool","input":{"tool":"documents.doc_semantic_search","arguments":{"query":"How does memory connect to action prediction?","target":"text","top_k":5}}}
+```
+
+Provide query text, an image, or both. Chat uploads receive a stable
+`attachment:...` reference in host message context; pass it as `image_ref`.
+A library image's exact `doc:...` locator also works. `target=auto` searches
+text/caption evidence for text queries and image/native-joint evidence when an
+image is supplied. `text` selects source text blocks; `image` selects image-related
+representations. Task planning stays with the agent.
+
+The default result contains at most five compact source cards and `coverage`,
+including indexed paper names. Unindexed papers are not treated as absent
+evidence. No image pixels or full paragraphs are attached: inspect originals
+through `doc_read`/`doc_view`. `snippet_source` and provenance distinguish generated
+descriptions. Legacy `image_locator`/`image_path` and advanced `representations`
+remain supported. Image input forms are mutually exclusive; explicit text/image
+targets cannot combine with advanced representation filtering. Local paths are
+bounded to the workspace, selected library, or current session, with no remote URLs.
+
+Files live under the current session's `attachments/`; resume and fork preserve
+references without rewriting original messages/history. The sidebar's semantic
+coverage badge opens index management. Tool cards show excerpts and source
+buttons, with raw JSON available on expansion.
+
 The document service can also run independently for other MCP clients:
 
 ```bash
 python -m dcx.deepdocx.server --root /path/to/paper-bundles
 ```
+
+This standalone command exposes the basic document tools. The dcx host also
+passes credential-free semantic settings; see the
+[index guide](multimodal-index.en.md) for other clients.
 
 ## Sources and heterogeneous renditions
 
@@ -165,6 +238,11 @@ existing basic index uses FTS5; Marker uses lexical matching. Original captions
 may be missing, and figures or equations may need visual inspection to verify
 details. If no crop is available, the service uses the containing page.
 
+Semantic blocks preserve these original units: each block retains its source
+locators, title, headings, and bounding box. Caption/joint hits still resolve to
+the original image and text, with generation model and input provenance recorded
+separately.
+
 These locators belong to this project's document MCP interface. When connecting
 another service, use its actual returned schema.
 
@@ -189,13 +267,14 @@ another service, use its actual returned schema.
 
 ## Current limitations
 
-Vector search, image similarity retrieval, generated captions, semantic block
-indexes, remote MCP transports, and multi-user operation are not implemented
-in this version. PDF ingestion runs as an independent system job, described in
-the [ingestion guide](deepdocx-ingest.en.md), and is not an agent tool. For an uploaded image, a vision-capable
-model can extract visible terms and try keyword lookup. Images without text
-need other available clues or future vector tools. The agent should not claim
-to have performed vector search.
+Optional text-block/image/caption/native-joint indexes support semantic lookup and
+image queries. Configure Gitee and DashScope services and inspect coverage in
+Index management; see the [index guide](multimodal-index.en.md). Generated
+captions are derived descriptions, not source quotations. Missing or stale
+indexes remain explicit; keyword and native file tools continue to work.
+PDF ingestion runs as an independent system job, described in the
+[ingestion guide](deepdocx-ingest.en.md). Remote MCP and multi-user operation
+remain future work.
 
 Image analysis requires actual image support from the model and endpoint.
 Reading metadata or showing an image in the browser does not mean the model

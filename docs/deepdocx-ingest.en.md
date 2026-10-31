@@ -3,9 +3,12 @@
 [简体中文](deepdocx-ingest.md) | **English** · [Home](../README.en.md)
 
 Add PDFs to a connected library, then search the original text and inspect its
-pages and figures. **Upload, conversion, publication, and indexing are system
+pages and figures. **Upload, conversion, publication, and full-text catalog updates are system
 jobs.** They do not call a conversational model, enter Agent Runtime, or appear
 as model tools such as `doc_build`.
+Optional multimodal indexing starts as a separate post-publication job that can
+call embedding and visual description services. Its outcome is independent of
+basic ingestion.
 
 ## Add documents in the Web interface
 
@@ -51,9 +54,10 @@ If the source PDF has changed, rename it before adding it to avoid associating
 Basic and Marker with different sources under one document ID.
 
 Outcomes are recorded separately for each rendition. A successful Basic output
-with a failed Marker output, or the reverse, is reported as **partial**. Index
-update failures also prevent a success result. Published documents remain
+with a failed Marker output, or the reverse, is reported as **partial**. Full-text
+catalog update failures also prevent a success result. Published documents remain
 readable through lexical scanning when indexing is incomplete.
+Semantic indexing is separate: successful ingestion does not imply ready vectors.
 
 Locators preserve the version and rendition:
 
@@ -64,8 +68,9 @@ doc:paper_xxx@v1/marker-json-v1/unit:u_...
 
 ## Command line
 
-Document administration runs independently of the agent and needs no provider
-or API key:
+The ingestion commands below run independently of the agent. Basic conversion
+needs no provider or API key; enrolled post-ingestion semantic jobs use their
+own inference configuration:
 
 ```bash
 # Use data/ or an existing paper-bundles/ root. Create an empty root first.
@@ -96,6 +101,11 @@ flowchart LR
     L --> I[Incremental FTS and library revision]
     I --> R[Web / read-only document MCP]
     R --> A[Existing agent loop]
+    S -. automatic sync enabled .-> Q[Independent semantic index job]
+    L --> Q
+    Q --> M[Embeddings / visual descriptions / native fusion]
+    M --> D[XDG derivative store]
+    R --> D
 ```
 
 The agent reads outputs and cannot start ingestion through document MCP tools.
@@ -103,6 +113,35 @@ Progress does not change the transcript or trigger model turns. After publicatio
 Web readers and existing MCP processes refresh their caches on their next read.
 A session's document scope remains in force; to include a new document outside
 that scope, adjust it and start a new document session.
+
+## How new documents reach the semantic index
+
+`catalog.sqlite` is the Basic full-text catalog for keyword lookup. The semantic
+`index.sqlite` contains vectors, captions, and input fingerprints. They are
+separate indexes: ingestion maintains the former, and an independent worker
+builds the latter.
+
+Connecting a library or setting credentials does not build its entire semantic
+index by default. The first manual sync through Index management or
+`dcx docs index sync --library /path/to/paper-bundles` saves that library's
+automatic-sync preference. `[deepdocx.index] auto_sync=true` can set the default
+for libraries without a saved preference.
+
+When a later Web/CLI ingestion task ends after publishing new output, the
+service attempts to enqueue semantic synchronization only for documents published
+by that task, preserving other pending papers, and records
+`semantic_job_id` in its result. Publication during an active sync requests a
+follow-up incremental pass. Conversion does not wait for embeddings or captions;
+complete bundles are immediately readable, and semantic failure does not roll
+back sources. Missing credentials, disabled automatic sync, or no new publication
+mean no automatic build; fix the setup and synchronize manually when needed.
+
+Externally copied bundles bypass this notification and require manual sync.
+Replacing Basic or adding Marker changes input fingerprints, excluding old
+vectors until synchronization builds from the latest artifacts and reuses
+unchanged inference inputs. Generated captions and vectors stay in XDG,
+preserving bundle manifests, checksums, and locators. See
+[multimodal indexes](multimodal-index.en.md) for configuration and recovery.
 
 ## Storage and lifecycle
 
@@ -158,7 +197,6 @@ containing spaces. Readiness checks do not download models or guarantee Marker
 weights and GPU readiness; actual converter errors appear in the job. Upload
 requests never install Marker or call a conversational model.
 
-Only PDFs are accepted. There is no vector indexing or generated captioning.
-Basic does not perform OCR; scanned PDFs without extractable text retain page
+Only PDFs are accepted. Basic does not perform OCR; scanned PDFs without extractable text retain page
 previews and receive the `NO_TEXT` quality flag. For reading workflows, see the
 [DeepDocx guide](deepdocx.en.md).

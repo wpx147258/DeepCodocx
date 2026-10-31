@@ -1,0 +1,3 @@
+# Keep upstream bundles intact, including whitespace inside template strings.
+src/dcx/web/static/vendor/** linguist-vendored
+src/dcx/web/static/vendor/*.min.js -whitespace

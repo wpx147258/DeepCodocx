@@ -35,6 +35,10 @@ document mode offers a fork or a fresh start. See the
 
 ## The Web workspace
 
+Mermaid code blocks provide Diagram / Mermaid source switching and source copying.
+Click the diagram or Expand to inspect it with zoom, drag, Fit, and 100% controls;
+Escape closes the viewer. Diagram colors follow the workspace theme.
+
 - Streaming text, collapsible reasoning, and tool cards with actual inputs and
   outputs.
 - Browser approvals, Ask / Auto permissions, model switching, and context
@@ -42,6 +46,9 @@ document mode offers a fork or a fresh start. See the
 - Session search, rename, archive, restore, and Markdown / JSON export.
 - Paste, drop, or attach PNG / JPEG / GIF / WebP images: up to four per message,
   5 MiB each.
+- DeepDocx can use chat attachments for image or mixed retrieval. Tool cards show
+  a few sources and coverage; the agent reads original text/images as needed.
+  A sidebar badge reports semantic index coverage.
 - Edit and resend, regenerate, and rewind conversation or code independently,
   with file conflicts and diffs available before restoration.
 - Stop the current task, compact context, and view shortcuts with `Ctrl/⌘ + /`.
@@ -59,6 +66,37 @@ a token; `--token` sets one explicitly. The page uses CSP, and API requests use
 `X-DCX-Token`. The legacy `X-CLI-Agent-Token` header remains accepted; when the
 new header is present, it takes precedence. Pair network exposure with an
 authenticated proxy.
+
+## Document and index administration
+
+In DeepDocx, **添加文档** (Add documents) uploads PDFs and builds bundles.
+**索引管理** (Index management) synchronizes multimodal indexes, selects captions,
+stops index jobs, and previews text/image queries. Both run as independent
+background tasks. Closing a dialog keeps them running; stopping an agent turn
+does not cancel ingestion or indexing.
+
+CLI administration likewise creates no session and needs no answer model:
+
+```bash
+dcx docs ingest --library /path/to/paper-bundles --mode basic paper.pdf
+dcx docs index status --library /path/to/paper-bundles
+dcx docs index sync --library /path/to/paper-bundles --no-wait
+dcx docs index sync --library /path/to/paper-bundles --doc paper_37126553647c
+dcx docs index cancel --library /path/to/paper-bundles JOB_ID
+dcx docs index search --library /path/to/paper-bundles "memory and action prediction"
+dcx docs index search --library /path/to/paper-bundles --image figure.png
+```
+
+Basic conversion needs no model key; semantic synchronization and queries need
+configured inference credentials. `sync` waits by default; `--no-wait` returns
+the job record, and `status` reports progress later. `--force` requests inference
+again; use ordinary sync for new documents. The first manual sync enrolls that
+library in automatic synchronization after ingestion.
+
+Ingestion and waiting index sync return 0 on success, and 1 for partial completion,
+failure, or cancellation. These differ from `dcx run` agent-turn exit codes below.
+See `dcx docs --help`, `dcx docs index --help`, the
+[ingestion guide](deepdocx-ingest.en.md), and [multimodal indexes](multimodal-index.en.md).
 
 ## Permissions and tools
 

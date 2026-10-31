@@ -266,11 +266,22 @@
   function codeBlock(code, lang, open) {
     const label = lang ? escapeHtml(lang) : "code";
     const suffix = open ? '<span class="tool-status running">streaming</span>' : "";
+    if (!open && String(lang).toLowerCase() === "mermaid" && window.DcxDiagrams) {
+      return window.DcxDiagrams.markup(code);
+    }
     return (
       `<div class="code"><div class="code-head"><span>${label}${suffix}</span>` +
       `<button class="copy" type="button">Copy</button></div>` +
       `<pre><code>${escapeHtml(code)}</code></pre></div>`
     );
+  }
+
+  function hydrateMermaid(root) {
+    window.DcxDiagrams?.hydrate(root);
+  }
+
+  function refreshMermaid() {
+    window.DcxDiagrams?.refresh();
   }
 
   function renderMarkdown(source) {
@@ -408,7 +419,7 @@
 
   function avatar() {
     const node = h("span", "avatar");
-    node.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    node.innerHTML = '<svg viewBox="0 0 72 72" focusable="false"><use class="logo-day" href="/static/dox-mark.svg#dox-symbol"/><use class="logo-night" href="/static/dox-mark.svg#dox-symbol-dark"/></svg>';
     return node;
   }
 
@@ -485,6 +496,30 @@
       .join("\n");
   }
 
+  function renderSemanticCards(output, text) {
+    let result;
+    try { result = JSON.parse(text); } catch (_) { return false; }
+    if (result?.strategy !== "semantic" || !Array.isArray(result.hits)) return false;
+    const modes = {text: "文字语义检索", image: "图片检索", image_text: "图文混合检索"};
+    const coverage = result.coverage;
+    output.appendChild(h("div", "semantic-result-summary", `${modes[result.query_mode] || "语义检索"} · ${result.hits.length} 条来源${coverage ? ` · 索引覆盖 ${coverage.searchable_documents}/${coverage.total_documents} 篇` : ""}`));
+    for (const warning of (result.warnings || []).slice(0, 5)) output.appendChild(h("p", "semantic-warning", warning));
+    for (const hit of result.hits.slice(0, 20)) {
+      const card = h("div", "semantic-source-card");
+      const button = h("button", "source-link", `${hit.title || hit.doc_id || "文档来源"} · 第 ${hit.page || "?"} 页 ↗`);
+      button.type = "button";
+      button.dataset.locator = hit.locator;
+      card.append(button, h("p", "", hit.snippet || "查看原图或原文。"));
+      const source = {source_text: "原文片段", original_caption: "原始图注", generated_description: "模型生成描述 · 请回读原文核对", image: "图像来源 · 请查看原图"}[hit.snippet_source];
+      if (source) card.appendChild(h("small", "", source));
+      output.appendChild(card);
+    }
+    const raw = h("details", "semantic-raw");
+    raw.append(h("summary", "", "Raw result"), h("pre", "", text));
+    output.appendChild(raw);
+    return true;
+  }
+
   function finishToolCard(card, result, elapsed) {
     if (!card) return;
     const status = card.querySelector(".tool-status");
@@ -494,7 +529,8 @@
     const output = card.querySelector(".tool-output");
     output.textContent = "";
     const text = toolOutputText(result.content);
-    if (text.trim()) {
+    const semanticCards = text.trim() && renderSemanticCards(output, text);
+    if (text.trim() && !semanticCards) {
       output.appendChild(h("div", "tool-section-label", "Output"));
       output.appendChild(h("pre", "", text));
     }
@@ -512,7 +548,7 @@
     }
     card.classList.remove("running");
     const locators = [...new Set(text.match(/doc:[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:page|unit|asset):[A-Za-z0-9_.-]+/g) || [])];
-    for (const locator of locators.slice(0, 8)) {
+    for (const locator of semanticCards ? [] : locators.slice(0, 8)) {
       const button = h("button", "ghost small source-link", `打开来源 · ${locator.split("/").pop()}`);
       button.type = "button";
       button.dataset.locator = locator;
@@ -548,6 +584,7 @@
         const node = h("div", "md");
         node.innerHTML = renderMarkdown(block.text);
         shell.segments.appendChild(node);
+        hydrateMermaid(node);
       } else if (block.type === "reasoning") {
         if (!block.text) continue;
         shell.segments.appendChild(addThinking(block.text, false));
@@ -589,6 +626,7 @@
   }
 
   function renderHistory(messages) {
+    window.DcxDiagrams?.close();
     const container = $("messages");
     container.textContent = "";
     // Assistant messages separated only by tool results belong to one visual
@@ -716,6 +754,10 @@
       node.classList.remove("is-streaming");
     }
     const live = turn.shell.row.classList.contains("streaming");
+    // Render after streaming settles; also cover a segment flushed before a tool.
+    for (const node of nodes) {
+      if (!live || node !== turn.currentText) hydrateMermaid(node);
+    }
     const last = turn.textSegments[turn.textSegments.length - 1];
     if (live && last) last.classList.add("is-streaming");
     turn.dirtyText = null;
@@ -737,7 +779,10 @@
     turn.elapsed = performance.now() - turn.startedAt;
     turn.stopReason = stopReason || turn.stopReason || "end_turn";
     turn.shell.row.classList.remove("streaming");
-    for (const node of turn.textSegments) node.classList.remove("is-streaming");
+    for (const node of turn.textSegments) {
+      node.classList.remove("is-streaming");
+      hydrateMermaid(node);
+    }
     for (const thinking of turn.shell.row.querySelectorAll(".thinking[open]")) {
       thinking.open = false;
     }
@@ -779,6 +824,7 @@
       }
       case "tool_started": {
         clearPending(turn);
+        if (turn.currentText) hydrateMermaid(turn.currentText);
         turn.currentText = null;
         turn.currentReasoning = null;
         turn.currentReasoningText = null;
@@ -1384,8 +1430,11 @@
   // ---------------------------------------------------------- document workspace
 
   function applyDocumentMode(data) {
+    window.DcxIndexes?.setContext(data);
     const active = data.mode === "deepdocx";
+    const changed = document.documentElement.dataset.mode !== (active ? "deepdocx" : "normal");
     document.documentElement.dataset.mode = active ? "deepdocx" : "normal";
+    if (changed) refreshMermaid();
     document.querySelector(".brand-name").textContent = active ? "DeepDocx" : "dcx";
     $("deepdocx-entry").textContent = active ? "← Agent" : "▧ DeepDocx";
     $("document-navigation").hidden = !active;
@@ -1656,7 +1705,7 @@
     ingestState.job = job;
     $("ingest-progress").hidden = false;
     const current = job.current;
-    $("ingest-status").textContent = (ingestLabels[job.status] || job.status) + (current ? ` · ${current.mode === "basic" ? "Basic" : "Marker"} · ${current.name}` : "");
+    $("ingest-status").textContent = (job.status === "succeeded" && job.result?.semantic_job_id ? "文档已添加，语义索引在后台同步" : ingestLabels[job.status] || job.status) + (current ? ` · ${current.mode === "basic" ? "Basic" : "Marker"} · ${current.name}` : "");
     const phases = job.mode === "both" ? 2 : 1;
     const total = Math.max(1, job.files.length * phases);
     const done = job.files.reduce((sum, item) => sum + Object.keys(item.modes || {}).length, 0);
@@ -1686,6 +1735,7 @@
       const data = await api(`/api/ingest/jobs/${encodeURIComponent(job.id)}`);
       if (ingestState.job?.id !== job.id) return;
       renderIngest(data);
+      window.DcxIndexes?.refreshIfOpen();
       if (job.library_id === state.data?.session_context?.library_id) await refreshDocumentNavigation();
       if (!INGEST_TERMINAL.has(data.status)) ingestState.timer = setTimeout(pollIngest, 1200);
     } catch (error) {
@@ -2484,8 +2534,10 @@
   // -------------------------------------------------------------------- theme
 
   function applyTheme(theme) {
+    const changed = document.documentElement.dataset.theme !== theme;
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("dcx-theme", theme); } catch (_) { /* ignore */ }
+    if (changed) refreshMermaid();
   }
 
   function initialTheme() {
@@ -2575,6 +2627,7 @@
     $("deepdocx-register").addEventListener("click", registerLibrary);
     $("deepdocx-library").addEventListener("change", loadDocumentScope);
     $("deepdocx-form").addEventListener("submit", enterDocumentMode);
+    document.addEventListener("dcx-open-evidence", (event) => { if (typeof event.detail === "string") openEvidence(event.detail); });
     $("ingest-open").addEventListener("click", openIngestDialog);
     $("ingest-form").addEventListener("submit", startIngest);
     $("ingest-cancel").addEventListener("click", cancelIngest);
@@ -2701,6 +2754,8 @@
     $("perm-deny").addEventListener("click", () => decidePermission("no"));
 
     document.addEventListener("keydown", (event) => {
+      // Native dialog owns Escape and focus while inspecting a diagram.
+      if ($("diagram-viewer").open) return;
       if (!$("permission").hidden) {
         if (event.key === "Escape") { event.preventDefault(); decidePermission("no"); }
         if (event.key === "Enter" && event.target.tagName !== "BUTTON") {

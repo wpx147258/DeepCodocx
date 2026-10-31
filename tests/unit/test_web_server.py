@@ -257,6 +257,11 @@ async def test_static_assets_and_headers(client_factory) -> None:
         assert "text/javascript" in script.headers["content-type"]
         style = await client.get("/static/styles.css")
         assert style.status_code == 200
+        mermaid = await client.head("/static/vendor/mermaid.min.js")
+        assert mermaid.status_code == 200
+        assert "javascript" in mermaid.headers["content-type"]
+        diagrams = await client.get("/static/diagrams.js")
+        assert diagrams.status_code == 200
         icon = await client.get("/favicon.svg")
         assert icon.status_code == 200
 
@@ -354,12 +359,22 @@ async def test_open_session_endpoint_passes_the_id(tmp_path: Path) -> None:
 
 
 def test_static_assets_are_self_contained() -> None:
-    for name in ("index.html", "app.js", "styles.css", "favicon.svg"):
+    for name in (
+        "index.html",
+        "app.js",
+        "diagrams.js",
+        "styles.css",
+        "favicon.svg",
+        "vendor/mermaid.min.js",
+        "vendor/mermaid.LICENSE",
+    ):
         assert (STATIC_DIR / name).is_file()
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert '/static/app.js' in html
     assert '/static/styles.css' in html
+    assert html.index('/static/vendor/mermaid.min.js') < html.index('/static/diagrams.js')
+    assert html.index('/static/diagrams.js') < html.index('/static/app.js')
     assert "http://" not in html
     assert "https://" not in html
     assert "eval(" not in script
@@ -495,6 +510,9 @@ async def test_token_protects_api_but_not_the_page(tmp_path: Path) -> None:
         denied = await client.get("/api/bootstrap")
         assert denied.status_code == 401
         assert (await client.get("/api/ingest/environment")).status_code == 401
+        assert (await client.get("/api/index/status")).status_code == 401
+        assert (await client.post("/api/index/sync",json={})).status_code == 401
+        assert (await client.post("/api/index/search",json={})).status_code == 401
         assert (await client.post("/api/ingest/jobs", json={})).status_code == 401
         wrong = await client.get(
             "/api/bootstrap", headers={"X-DCX-Token": "nope"}

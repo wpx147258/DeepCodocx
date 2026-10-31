@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/web/dox-logo-dark.svg">
+    <img src="docs/web/dox-logo.svg" alt="DeepCodocx logo" width="300">
+  </picture>
+</p>
+
 # DeepCodocx
 
 [简体中文](README.md) | **English**
@@ -18,7 +25,7 @@ concepts, excerpts, and figures. Progressive context and MCP tools discovered on
 demand give the agent access to documents. The agent decides how to combine
 search, reading, visual inspection, and native Bash / Read tools.
 
-![DeepDocx: conversation, document navigation, and source figure preview](docs/web/deepdocx-light.png)
+![DeepDocx demo: conversation, document navigation, and source figure preview](docs/web/dcx.gif)
 
 [Dark theme](docs/web/deepdocx-dark.png) · [Mobile](docs/web/deepdocx-mobile.png) ·
 [General agent workspace](docs/web/chat-light.png)
@@ -27,6 +34,9 @@ search, reading, visual inspection, and native Bash / Read tools.
 
 - **Follow an answer back to its evidence.** Click a source to open its text,
   page, or figure. Locations retain the document version, rendition, and page.
+- **Locate evidence by concept or image.** Optional multimodal indexes cover text
+  blocks, images, original/generated captions, and native image–caption embeddings.
+  Query with text, an image, or both, then inspect the original sources.
 - **Combine code and document tools freely.** Built-in file and shell tools work
   alongside local MCP capabilities discovered on demand. The same agent decides
   which evidence it needs and what to do next.
@@ -83,6 +93,16 @@ explain the method with evidence, all within one discussion. An available
 library is selected automatically. The [DeepDocx guide](docs/deepdocx.en.md)
 describes accepted inputs and document workflows.
 
+For semantic or image lookup, set `GITEE_API_KEY` and `DASHSCOPE_API_KEY` in the
+server's launch environment, open **索引管理** (Index management), search and select
+a paper, then synchronize. All embeddings default to DashScope
+`qwen3-vl-embedding` at 2560 dimensions. Gitee generates optional captions and
+remains an explicitly configured backup encoder. Full-library builds require
+an explicit selection.
+The first manual sync enrolls the library in automatic synchronization after
+ingestion. Keyword lookup and source reading work without a semantic index.
+See [multimodal indexes](docs/multimodal-index.en.md) for setup and usage.
+
 The interface examples use preprocessed papers and a scripted provider. Actual
 answer quality depends on the selected model and the source documents.
 
@@ -110,8 +130,9 @@ printf 'Describe this repository: entry points and main modules' | \
 |---|---|
 | [DeepDocx document guide](docs/deepdocx.en.md) | Libraries, figures, citations, and document MCP tools |
 | [CLI and Web guide](docs/usage.en.md) | Sessions, permissions, rewind, terminal commands, and structured output |
+| [Multimodal indexes](docs/multimodal-index.en.md) | DashScope encoding, Gitee backup/captions, and synchronization by paper |
 | [Configuration](docs/configuration.en.md) | Providers, thinking, libraries, and external MCP servers |
-| [Architecture](docs/architecture.en.md) | The shared runtime, tool boundaries, context, and persistence |
+| [Architecture](docs/architecture.en.md) | The shared runtime, document reading/writing boundaries, multimodal indexes, and persistence |
 | [Development](docs/development.en.md) | Development setup, testing, and contribution conventions |
 | [Troubleshooting](docs/troubleshooting.en.md) | WSL, ports, project renames, and session history |
 
@@ -119,8 +140,11 @@ printf 'Describe this repository: entry points and main modules' | \
 
 Code tools, persistent sessions, keyword document search, text and image
 reading, and local stdio MCP are available today. Image and semantic vector
-search, generated captions, and remote MCP transports remain future work. PDF
-upload, Basic / Marker conversion, and indexing run as independent system jobs.
+search and generated descriptions are available through optional multimodal indexes;
+DashScope independent/joint queries use separate channels with profile isolation. See the
+[multimodal index guide](docs/multimodal-index.en.md). Remote MCP transports remain
+future work. PDF upload, conversion, full-text catalog updates, and semantic index
+construction run as independent system jobs.
 
 The permission system provides approvals and operation controls. Use external
 isolation for untrusted tasks. The Web server binds to loopback by default;

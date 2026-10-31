@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 340" role="img" aria-labelledby="title">
+  <title id="title">DeepCodocx</title>
+  <!-- Transparent canvas, editable colors, paths, gradients and wordmark text. -->
+  <style>
+    :root {
+      --logo-night: #a9c3e2;
+      --logo-dawn: #5e7c9e;
+      --logo-sun: #ffbb45;
+      --logo-text: #e6edf3;
+    }
+  </style>
+  <defs>
+    <linearGradient id="dox-orbit" gradientUnits="userSpaceOnUse" x1="14" y1="36" x2="60" y2="36">
+      <stop offset="0" stop-color="var(--logo-night, #a9c3e2)"/>
+      <stop offset=".42" stop-color="var(--logo-night, #a9c3e2)"/>
+      <stop offset=".76" stop-color="var(--logo-sun, #ffbb45)"/>
+      <stop offset="1" stop-color="var(--logo-sun, #ffbb45)"/>
+    </linearGradient>
+    <linearGradient id="dox-twilight" gradientUnits="userSpaceOnUse" x1="15" y1="14" x2="15" y2="56">
+      <stop offset="0" stop-color="var(--logo-night, #a9c3e2)"/>
+      <stop offset=".45" stop-color="var(--logo-night, #a9c3e2)"/>
+      <stop offset="1" stop-color="var(--logo-dawn, #5e7c9e)"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(179 12) scale(2.8)">
+    <path d="M15 14C37 4 59 16 60 36C58 57 37 66 15 56"
+          fill="none" stroke="url(#dox-orbit)" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M15 56C8 43 8 28 15 14"
+          fill="none" stroke="url(#dox-twilight)" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="15" cy="14" r="6.5" fill="var(--logo-night, #a9c3e2)"/>
+    <circle cx="15" cy="56" r="6.5" fill="var(--logo-dawn, #5e7c9e)"/>
+    <circle cx="60" cy="36" r="5.9" fill="var(--logo-sun, #ffbb45)"/>
+  </g>
+  <text x="280" y="288" text-anchor="middle" fill="var(--logo-text)"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif"
+        font-size="72" font-weight="700" letter-spacing="-3">DeepCodocx</text>
+</svg>

@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .atomic import atomic_write_text
 from .config import AppConfig, load_config
 from .context.memory import MemoryStore
 from .context.pipeline import ContextCheckpoint, ContextPipeline
@@ -43,6 +45,7 @@ from .providers.base import (
 )
 from .providers.factory import build_provider
 from .runtime import AgentRuntime, ProviderSlot, RuntimeDeps
+from .session.attachments import AttachmentStore
 from .session.checkpoints import CheckpointStore
 from .session.fork import fork_session
 from .session.paths import latest_session_id
@@ -273,9 +276,13 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
         servers = _server_configs(config.mcp_servers)
         if session_profile.mode == "deepdocx":
             command = [sys.executable, "-m", "dcx.deepdocx.server", "--root", session_profile.library_root]
+            semantic_settings=config.paths.data_dir/'semantic'/'settings'/f'{config.index.profile}-{config.caption.profile}.json'
+            atomic_write_text(semantic_settings,json.dumps({'data_dir':str(config.paths.data_dir),'index':asdict(config.index),'caption':asdict(config.caption)}))
+            command.extend(['--semantic-settings',str(semantic_settings),'--workspace',str(cwd)])
             for doc_id in session_profile.documents:
                 command.extend(["--doc", doc_id])
-            servers.append(ServerConfig("documents", tuple(command), read_tools=("doc_library", "doc_search", "doc_read", "doc_view", "doc_guide")))
+            keys={key:env[key] for key in (config.index.api_key_env,config.index.joint_key_env,config.caption.api_key_env) if env.get(key)}
+            servers.append(ServerConfig("documents", tuple(command), env=keys, read_tools=("doc_library", "doc_search", "doc_read", "doc_view", "doc_guide",'doc_semantic_search','doc_index_status'),timeout=120))
     except (ValueError, OSError) as exc:
         if store is not None:
             store.close()
@@ -316,6 +323,13 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             raise
 
     try:
+        attachments = AttachmentStore(store.paths.root)
+        if session_profile.mode == "deepdocx":
+            servers = [
+                replace(server, command=(*server.command, "--session-root", str(store.paths.root)))
+                if server.name == "documents" else server
+                for server in servers
+            ]
         memory_enabled = config.memory_enabled and options.persist
         skill_loader = SkillLoader.from_paths(
             config.paths.global_skills_dir,
@@ -367,6 +381,7 @@ def build_runtime(options: BuildOptions | None = None) -> RuntimeBundle:
             session_paths=store.paths,
             summarize=summarize,
             checkpoint=checkpoint,
+            message_context=attachments.enrich if session_profile.mode == "deepdocx" else None,
         )
         prompt_builder = PromptBuilder()
         project_instructions = load_project_instructions(

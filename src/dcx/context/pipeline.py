@@ -99,11 +99,13 @@ class ContextPipeline:
         session_paths: SessionPaths,
         summarize: Callable[[str, int], Awaitable[str]],
         checkpoint: ContextCheckpoint | None = None,
+        message_context: Callable[[Message], Message] | None = None,
     ) -> None:
         self.estimator = estimator
         self.session_paths = session_paths
         self._summarize_fn = summarize
         self._checkpoint = checkpoint
+        self._message_context = message_context
 
     @property
     def checkpoint(self) -> ContextCheckpoint | None:
@@ -131,6 +133,9 @@ class ContextPipeline:
                 self._checkpoint = None
             else:
                 view = applied
+
+        if self._message_context is not None:
+            view = [self._message_context(message) for message in view]
 
         budget = max(1_000, profile.context_window - profile.max_output_tokens - 4_096)
 
@@ -168,16 +173,18 @@ class ContextPipeline:
         if self._checkpoint is None:
             return view
         index = next(
-            (i for i, message in enumerate(view) if message.id == self._checkpoint.keep_from_message_id),
+            (
+                i
+                for i, message in enumerate(view)
+                if message.id == self._checkpoint.keep_from_message_id
+            ),
             None,
         )
         if index is None:
             return None
         return self._prepend_summary(view[index:], self._checkpoint)
 
-    def _prepend_summary(
-        self, tail: list[Message], checkpoint: ContextCheckpoint
-    ) -> list[Message]:
+    def _prepend_summary(self, tail: list[Message], checkpoint: ContextCheckpoint) -> list[Message]:
         summary_message = _summary_message(checkpoint)
         if tail and tail[0].role == "user":
             merged = Message(
@@ -233,9 +240,7 @@ class ContextPipeline:
                 )
             )
             return None
-        text = _trim_to_tokens(
-            _messages_to_text(head), input_budget, self.estimator
-        )
+        text = _trim_to_tokens(_messages_to_text(head), input_budget, self.estimator)
         if len(text) < 80:
             events.append(ContextEvent("compact_skipped", "history too short"))
             return None
@@ -297,9 +302,7 @@ class ContextPipeline:
 
 
 def _result_text(block: ToolResultBlock) -> str:
-    return "\n".join(
-        item.text for item in block.content if isinstance(item, TextBlock)
-    )
+    return "\n".join(item.text for item in block.content if isinstance(item, TextBlock))
 
 
 def _trim_to_tokens(text: str, max_tokens: int, estimator: TokenEstimator) -> str:

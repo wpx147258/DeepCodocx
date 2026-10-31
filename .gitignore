@@ -1,4 +1,5 @@
 .venv/
+.venv-native/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -18,3 +19,13 @@ htmlcov/
 /docs/learn/
 /docs/revision/
 /docs/local/
+/docs/report/
+/docs/reports/
+/docs/review/
+/docs/reviews/
+/docs/presentation/
+/docs/proposal/
+/docs/proposals/
+/docs/*项目书*
+/docs/*proposal*
+/docs/web/proposal-*

@@ -7,20 +7,25 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from ...config import AppPaths, IngestConfig
+from ..semantic.settings import CaptionConfig, IndexConfig
 from .jobs import TERMINAL, JobStore
 
 
 class IngestService:
-    def __init__(self, paths: AppPaths, settings: IngestConfig) -> None:
+    def __init__(self, paths: AppPaths, settings: IngestConfig, *, index: IndexConfig | None=None, caption: CaptionConfig | None=None, env: Mapping[str,str] | None=None) -> None:
         self.paths = paths
         self.settings = settings
         self.root = paths.data_dir / "ingest"
         self.store = JobStore(self.root / "jobs")
         self._processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.index, self.caption = index, caption
+        self.env = os.environ if env is None else env
 
     def create_job(
         self,
@@ -46,6 +51,8 @@ class IngestService:
                 "marker_timeout": self.settings.marker_timeout,
                 "max_upload_mb": self.settings.max_upload_mb,
             }
+            if self.index is not None and self.caption is not None:
+                job['semantic']={'data_dir':str(self.paths.data_dir),'index':asdict(self.index),'caption':asdict(self.caption)}
         return job
 
     def add_file(self, job_id: str, name: str, data: bytes | Path) -> dict[str, Any]:
@@ -119,6 +126,12 @@ class IngestService:
             # Persist queued before spawn, then hold the short state lock until PID
             # is saved. The worker acquires this same lock before touching state.
             self.store.write(job)
+            process_env=dict(os.environ)
+            if self.index is not None and self.caption is not None:
+                for key in (self.index.api_key_env,self.index.joint_key_env,self.caption.api_key_env):
+                    process_env.pop(key,None)
+                    if self.env.get(key):
+                        process_env[key]=self.env[key]
             try:
                 with (job_path.parent / "worker.log").open("ab") as log:
                     process = subprocess.Popen(
@@ -134,6 +147,7 @@ class IngestService:
                         stderr=subprocess.STDOUT,
                         start_new_session=True,
                         cwd=str(self.paths.cwd),
+                        env=process_env,
                     )
                 self._processes[job_id] = process
                 job["pid"] = process.pid

@@ -16,6 +16,7 @@ dependencies = [
     "jsonschema>=4.22",
     "starlette>=0.37",
     "pillow>=10",
+    "sqlite-vec>=0.1.6",
     "uvicorn>=0.30",
 ]
 

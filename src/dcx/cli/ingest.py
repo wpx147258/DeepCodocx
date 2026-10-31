@@ -37,7 +37,7 @@ def ingest(
     library = DocumentLibrary(library_path)
     if not library.root.is_dir():
         raise click.ClickException("Document library directory is unavailable")
-    service = IngestService(config.paths, config.ingest)
+    service = IngestService(config.paths, config.ingest,index=config.index,caption=config.caption)
     job = None
     try:
         job = service.create_job(library.id, library.root, mode, force=force)

@@ -89,6 +89,56 @@ is used. When nothing is configured or saved, a nearby `deep-docs-unified/data`
 can be discovered. See the [DeepDocx guide](deepdocx.en.md) for input formats and
 document scopes.
 
+## Multimodal semantic indexes
+
+Index services are configured separately from the conversational provider.
+`--provider`/`--model` choose the answer model, not embedding or caption models.
+Common settings are shown below; see the [index guide](multimodal-index.en.md)
+and [config.example.toml](../config.example.toml) for complete defaults:
+
+```toml
+[deepdocx.index]
+protocol = "dashscope"
+enabled = true
+auto_sync = false
+model = "qwen3-vl-embedding"
+api_key_env = "DASHSCOPE_API_KEY"
+dimensions = 2560
+joint_protocol = "dashscope"
+joint_model = "qwen3-vl-embedding"
+joint_key_env = "DASHSCOPE_API_KEY"
+joint_dimensions = 2560
+
+[deepdocx.caption]
+enabled = true
+model = "qwen3.8-flash"
+api_key_env = "GITEE_API_KEY"
+```
+
+`enabled` permits semantic operations; it does not mean the library is indexed.
+The default `auto_sync=false` avoids starting full-corpus inference merely
+because credentials exist. The first manual sync saves that library's automatic
+sync preference for future ingestion. A saved preference overrides global
+`auto_sync`. Externally copied files still need manual synchronization.
+
+The index panel saves description generation and model choices per library.
+`docs index sync --no-captions` also saves the choice not to generate descriptions.
+These preferences override the corresponding TOML defaults. Disabling generated
+descriptions still allows original-caption embeddings. Set
+`[deepdocx.index] enabled=false` to disable semantic operations while retaining
+keyword tools.
+
+Keys are read from the configured environment variable names in the launching
+process; restart the server after changing them. Both encoders default to
+DashScope at 2560 dimensions, with Gitee descriptions. To use the backup, set
+`protocol="gitee"` with Gitee's endpoint, model, key name, and dimensions;
+see the index guide. Synchronize selected papers after switching; old service
+vectors are never mixed. Web supports selecting papers, and CLI accepts
+`docs index sync --doc DOC_ID`. Automatic ingestion sync processes only newly
+published documents. “Configured” status checks settings and credential presence; actual
+request failures appear in jobs or query warnings. Derived databases live under
+`$XDG_DATA_HOME/dcx/semantic/<library-id>/`, outside bundles.
+
 ## MCP
 
 The generic MCP client supports local stdio. Executable commands come from local

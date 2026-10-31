@@ -561,7 +561,8 @@ class AgentRuntime:
         # Stored host metadata makes prior request bytes stable across turns.
         # After compaction, attach the same note to its stable new prefix.
         if note and view and not any(note in message.host_context for message in view):
-            view = (replace(view[0], host_context=note), *view[1:])
+            combined = "\n".join(part for part in (note, view[0].host_context) if part)
+            view = (replace(view[0], host_context=combined), *view[1:])
         view = tuple(
             replace(message, content=(*message.content, TextBlock(message.host_context)))
             if message.host_context else message for message in view
