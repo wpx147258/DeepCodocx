@@ -63,6 +63,7 @@ from ..permissions.policy import Answer, PermissionRequest
 from ..session.lock import FileLock
 from ..session.meta import clean_title, read_session_meta, update_session_meta
 from ..session.paths import SessionPaths, list_session_ids
+from .instances import remove_instance, write_instance
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,11 @@ class WebHost:
         self._factory = factory
         self._turn: asyncio.Task[None] | None = None
         self._queue: asyncio.Queue[Any] | None = None
+        # Events are retained for a browser that reloads mid-turn. A new
+        # subscriber replays them and then continues from the live queue.
+        self._turn_events: list[dict[str, Any]] = []
+        self._turn_done = True
+        self._turn_base = 0
         self._permissions: dict[str, asyncio.Future[Answer]] = {}
         self._closed = False
 
@@ -143,16 +149,63 @@ class WebHost:
     def busy(self) -> bool:
         return self._turn is not None and not self._turn.done()
 
+    def active_turn_payload(self) -> dict[str, Any] | None:
+        """Describe the turn a reloaded page should reattach to."""
+        if self._turn_done or self._turn is None or self._turn.done():
+            return None
+        return {
+            "base": self._turn_base,
+            "model": self.runtime.model,
+            "provider": self.runtime.provider_name,
+        }
+
+    def _publish(self, payload: dict[str, Any]) -> None:
+        self._turn_events.append(payload)
+        if self._queue is not None:
+            self._queue.put_nowait(payload)
+
+    def _finish_turn(self) -> None:
+        self._turn_done = True
+        queue, self._queue = self._queue, None
+        if queue is not None:
+            queue.put_nowait(_END)
+
+    def _forget_permission(self, request_id: str) -> None:
+        """A resolved prompt must not reappear when a page reattaches."""
+        self._turn_events = [
+            event
+            for event in self._turn_events
+            if not (
+                event.get("type") == "permission_request"
+                and event.get("id") == request_id
+            )
+        ]
+
+    def _deny_pending_permissions(self) -> None:
+        for request_id, future in self._permissions.items():
+            if not future.done():
+                future.set_result("no")
+            self._forget_permission(request_id)
+        self._permissions.clear()
+
+    def attach_turn(self) -> tuple[list[dict[str, Any]], asyncio.Queue[Any] | None]:
+        """Return the replay log and the live queue for the current turn."""
+        if self._turn is None or self._turn_done or self._turn.done():
+            return [], None
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        replay = list(self._turn_events)
+        self._queue = queue
+        return replay, queue
+
     async def request_permission(self, request: PermissionRequest) -> Answer:
-        queue = self._queue
-        if queue is None or self._closed:
+        if self._closed:
             return "no"
         request_id = uuid.uuid4().hex[:12]
         future: asyncio.Future[Answer] = (
             asyncio.get_running_loop().create_future()
         )
         self._permissions[request_id] = future
-        await queue.put(
+        self._publish(
             {
                 "type": "permission_request",
                 "id": request_id,
@@ -170,12 +223,14 @@ class WebHost:
             return "no"
         finally:
             self._permissions.pop(request_id, None)
+            self._forget_permission(request_id)
 
     def resolve_permission(self, request_id: str, decision: Answer) -> bool:
         future = self._permissions.get(request_id)
         if future is None or future.done():
             return False
         future.set_result(decision)
+        self._forget_permission(request_id)
         return True
 
     async def cancel_turn(self) -> bool:
@@ -185,6 +240,7 @@ class WebHost:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
+        self._deny_pending_permissions()
         return True
 
     async def close(self) -> None:
@@ -225,20 +281,27 @@ class WebHost:
             "mode": runtime.session_profile.mode,
             "session_context": runtime.session_profile.to_dict(),
             "libraries": self.bundle.libraries.entries() if self.bundle.libraries else [],
+            "active_turn": self.active_turn_payload(),
         }
 
     async def _run_turn(
         self,
         text: str | None,
         images: tuple[ImageBlock, ...],
-        queue: asyncio.Queue[Any],
     ) -> None:
         try:
+            self._publish(
+                {
+                    "type": "turn_start",
+                    "model": self.runtime.model,
+                    "provider": self.runtime.provider_name,
+                }
+            )
             async for event in self.runtime.run_turn(text, images=images):
-                await queue.put(_event(event))
+                self._publish(_event(event))
         except asyncio.CancelledError:
-            await queue.put({"type": "cancelled"})
-            await queue.put(
+            self._publish({"type": "cancelled"})
+            self._publish(
                 {
                     "type": "done",
                     "stop_reason": "cancelled",
@@ -248,14 +311,14 @@ class WebHost:
             raise
         except Exception as exc:  # noqa: BLE001 - report, do not kill the host
             logger.exception("web turn failed")
-            await queue.put(
+            self._publish(
                 {
                     "type": "error",
                     "kind": "fatal",
                     "message": f"{type(exc).__name__}: {exc}",
                 }
             )
-            await queue.put(
+            self._publish(
                 {
                     "type": "done",
                     "stop_reason": "error",
@@ -263,7 +326,7 @@ class WebHost:
                 }
             )
         finally:
-            await queue.put(_END)
+            self._finish_turn()
 
     def start_turn(
         self, text: str | None, images: tuple[ImageBlock, ...] = ()
@@ -271,23 +334,27 @@ class WebHost:
         """Reserve the turn synchronously so rewind cannot interleave."""
         if self.busy:
             raise TurnBusy
+        self._deny_pending_permissions()
+        self._turn_events = []
+        self._turn_done = False
+        self._turn_base = len(self.runtime.messages)
         queue: asyncio.Queue[Any] = asyncio.Queue()
         self._queue = queue
-        self._turn = asyncio.create_task(self._run_turn(text, images, queue))
+        self._turn = asyncio.create_task(self._run_turn(text, images))
         return queue
 
     async def stream_started(
-        self, queue: asyncio.Queue[Any], request: Request
+        self,
+        queue: asyncio.Queue[Any] | None,
+        request: Request,
+        replay: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     ) -> AsyncIterator[str]:
         disconnect = asyncio.create_task(_wait_for_disconnect(request))
         try:
-            yield _sse(
-                {
-                    "type": "turn_start",
-                    "model": self.runtime.model,
-                    "provider": self.runtime.provider_name,
-                }
-            )
+            for payload in replay:
+                yield _sse(payload)
+            if queue is None:
+                return
             while True:
                 getter = asyncio.create_task(queue.get())
                 done, _ = await asyncio.wait(
@@ -311,18 +378,10 @@ class WebHost:
             disconnect.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await disconnect
-            task = self._turn
-            if task is not None:
-                if not task.done():
-                    task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await task
-            self._turn = None
-            self._queue = None
-            for future in self._permissions.values():
-                if not future.done():
-                    future.set_result("no")
-            self._permissions.clear()
+            # A reload only detaches this view. The turn keeps running in the
+            # background and its log is available to the next connection.
+            if self._queue is queue:
+                self._queue = None
 
     async def stream_turn(
         self,
@@ -762,6 +821,20 @@ def create_app(
             },
         )
 
+    async def turn_stream(request: Request) -> Response:
+        replay, queue = host.attach_turn()
+        if queue is None:
+            return JSONResponse({"active": False}, status_code=204)
+        return StreamingResponse(
+            host.stream_started(queue, request, replay),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     async def permission(request: Request) -> Response:
         body = await _json_object(request)
         if body is None:
@@ -1076,6 +1149,7 @@ def create_app(
         Route("/api/bootstrap", bootstrap),
         Route("/api/health", health),
         Route("/api/chat", chat, methods=["POST"]),
+        Route("/api/turn/stream", turn_stream),
         Route("/api/permission", permission, methods=["POST"]),
         Route("/api/cancel", cancel, methods=["POST"]),
         Route("/api/clear", clear, methods=["POST"]),
@@ -1167,5 +1241,20 @@ def serve(
                 time.sleep(0.05)
 
         threading.Thread(target=_open_when_ready, daemon=True).start()
-    print(f"dcx web: {url}", flush=True)
-    server.run()
+    try:
+        instance_path = write_instance(
+            bundle.config.paths.data_dir,
+            host=host,
+            port=port,
+            cwd=str(bundle.config.paths.cwd),
+        )
+    except OSError:
+        # The registry is auxiliary; a read-only data directory must not stop
+        # the server from starting.
+        logger.warning("could not record the web instance", exc_info=True)
+        instance_path = None
+    try:
+        print(f"dcx web: {url}", flush=True)
+        server.run()
+    finally:
+        remove_instance(instance_path)

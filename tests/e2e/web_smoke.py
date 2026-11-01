@@ -208,7 +208,11 @@ def main() -> None:
                     page.locator('input[name="docx-start"][value="fork"]').check()
                     page.locator("#deepdocx-enter").click()
                     expect(page.locator(".brand-name")).to_have_text("DeepDocx")
+                    page.locator("#library-open").click()
+                    expect(page.locator("#library-dialog")).to_be_visible()
                     expect(page.locator("#document-list button")).to_have_count(expected_documents)
+                    expect(page.locator(".document-item-main strong").first).to_be_visible()
+                    page.locator("#library-dismiss").click()
                     current = page.evaluate("fetch('/api/bootstrap').then(r=>r.json())")
                     assert (
                         current["session_id"] != original_id

@@ -74,6 +74,20 @@ tool schemas. The Anthropic preset enables this. Other compatible endpoints
 default to off; confirm that the endpoint accepts the parameter before enabling
 it.
 
+## Web
+
+```toml
+[web]
+port = 8765
+```
+
+`dcx web` uses this port by default. `dcx web --auto-port` starts at this port:
+it tries the next one when another workspace owns it, and reports the running
+address when the current working directory already has a server. To force a
+second instance in the same workspace, run `dcx web --port 8766 --no-open`
+(without auto selection). Instance records live under
+`$XDG_DATA_HOME/dcx/web/instances/` and never contain tokens.
+
 ## Document libraries
 
 ```toml

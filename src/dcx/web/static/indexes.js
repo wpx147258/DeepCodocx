@@ -34,6 +34,9 @@
       $("semantic-status").textContent = "语义索引状态暂不可用";
     }
   }
+  function panelActive() {
+    return Boolean($("library-dialog")?.open) && $("library-panel-index")?.hidden === false;
+  }
   function allDocuments() { return document.querySelector('input[name="index-scope"]:checked')?.value === "all"; }
   function updateSelection() {
     if (!data) return;
@@ -116,7 +119,7 @@
     renderDocuments();
   }
   async function refresh() {
-    if (!$("index-dialog").open || !libraryId || requestPending) return;
+    if (!panelActive() || !libraryId || requestPending) return;
     requestPending = true;
     const current = ++sequence, selected = libraryId;
     clearTimeout(timer);
@@ -127,18 +130,17 @@
       error();
       if (payload.jobs.some((job) => !terminal.has(job.status))) timer = setTimeout(refresh, 1800);
     } catch (failure) { error(failure.message); }
-    finally { requestPending = false; if ($("index-dialog").open && current !== sequence) setTimeout(refresh, 0); }
+    finally { requestPending = false; if (panelActive() && current !== sequence) setTimeout(refresh, 0); }
   }
-  async function open() {
+  async function activate() {
     libraryId = context?.session_context?.library_id || "";
     if (!libraryId) return;
     const library = context.libraries?.find((item) => item.id === libraryId);
     $("index-library").textContent = library?.name || "当前文档库";
     $("index-library").title = library?.root || "";
-    $("index-dialog").showModal();
     // A previous full-library choice must not silently carry into another visit.
     document.querySelector('input[name="index-scope"][value="selected"]').checked = true;
-    $("index-dialog").querySelector(".index-body").scrollTop = 0;
+    $("library-panel-index").querySelector(".index-body").scrollTop = 0;
     data = null;
     $("index-sync").disabled = true;
     $("index-rebuild").disabled = true;
@@ -155,12 +157,9 @@
     finally { busy = false; }
     await refresh();
   }
-  $("index-open").addEventListener("click", open);
-  $("semantic-status").addEventListener("click", open);
   $("index-document-filter").addEventListener("input", renderDocuments);
   for (const input of document.querySelectorAll('input[name="index-scope"]')) input.addEventListener("change", updateSelection);
-  $("index-dismiss").addEventListener("click", () => $("index-dialog").close());
-  $("index-dialog").addEventListener("close", () => { clearTimeout(timer); sequence++; });
+  $("library-dialog").addEventListener("close", () => { clearTimeout(timer); sequence++; });
   $("index-refresh").addEventListener("click", refresh);
   $("index-sync").addEventListener("click", () => sync());
   $("index-rebuild").addEventListener("click", () => sync(true));
@@ -184,7 +183,7 @@
       const result = await api("/api/index/search", {library_id: libraryId, text: $("index-query").value.trim(), image, representations: value ? value.split(",") : []});
       $("index-results").replaceChildren(...result.hits.map((hit) => {
         const row = node("div", "", "index-result"), button = node("button", `${hit.title} · 第 ${hit.page} 页 ↗`);
-        button.type = "button"; button.addEventListener("click", () => { $("index-dialog").close(); document.dispatchEvent(new CustomEvent("dcx-open-evidence", {detail: hit.locator})); });
+        button.type = "button"; button.addEventListener("click", () => { $("library-dialog").close(); document.dispatchEvent(new CustomEvent("dcx-open-evidence", {detail: hit.locator})); });
         row.append(button, node("p", hit.snippet), node("small", `${hit.matched_representations.join(" · ")} · 排序 ${hit.score.toFixed(3)}`));
         return row;
       }));
@@ -194,7 +193,21 @@
     finally { $("index-search").disabled = false; }
   });
   window.DcxIndexes = {
-    setContext(value) { context = value; if ($("index-dialog").open && libraryId !== value.session_context?.library_id) $("index-dialog").close(); refreshAvailability(); },
-    refreshIfOpen() { refreshAvailability(true); return refresh(); },
+    setContext(value) {
+      const changed = (context?.session_context?.library_id || "") !== (value.session_context?.library_id || "");
+      context = value;
+      if (changed) {
+        libraryId = value.session_context?.library_id || "";
+        data = null;
+        selectedDocs.clear();
+        selectionLibrary = "";
+        clearTimeout(timer);
+        sequence++;
+        if (panelActive()) activate().catch(() => {});
+      }
+      refreshAvailability();
+    },
+    activate,
+    refreshIfOpen() { refreshAvailability(true); if (panelActive()) return refresh(); },
   };
 })();

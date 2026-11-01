@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <title>dcx</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=dox-day-night">
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -45,22 +46,15 @@
         </div>
 
         <div id="document-navigation" class="side-section" hidden>
-          <div class="side-label">文档库</div>
-          <button class="ghost library-name" id="library-name" type="button" title="选择文档库与范围"></button>
-          <div class="library-actions"><button class="ghost small ingest-open" id="ingest-open" type="button">＋ 添加文档</button><button class="ghost small" id="index-open" type="button" title="管理文本、图像与图注索引">索引管理</button></div>
-          <button class="ghost small semantic-status" id="semantic-status" type="button" hidden>语义索引状态…</button>
-          <input id="document-search" class="document-search" type="search" placeholder="查找论文…" aria-label="查找论文">
-          <div class="document-list" id="document-list"></div>
+          <button class="library-manage" id="library-open" type="button" title="管理文档库、添加文档与索引">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15.5H6.5A1.5 1.5 0 0 0 5 20V4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M5 19.5A1.5 1.5 0 0 1 6.5 18H19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span class="library-manage-text"><strong>文档库管理</strong><small id="library-manage-name">当前文档库</small></span>
+            <svg class="library-manage-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.5 6.5 15 12l-5.5 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
       </div>
 
       <div class="side-section side-settings">
-        <div class="side-label">Model</div>
-        <div class="select-wrap">
-          <select id="model-select" aria-label="Model"></select>
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-
         <div class="side-label">Permissions</div>
         <div class="segmented" id="mode-toggle" role="group" aria-label="Permission mode">
           <button type="button" data-auto="false">Ask</button>
@@ -106,7 +100,10 @@
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9h16M4 15h16M9 4l-5 5 5 5M15 20l5-5-5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>Compact</span>
           </button>
-          <span class="model-chip" id="model-chip">—</span>
+          <label class="top-model">
+            <select id="model-select" aria-label="Model"></select>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </label>
         </div>
       </header>
 
@@ -190,71 +187,117 @@
     </form>
   </dialog>
 
-  <dialog id="ingest-dialog" class="deepdocx-dialog ingest-dialog" aria-labelledby="ingest-title" aria-describedby="ingest-description">
-    <form id="ingest-form" novalidate>
-      <div class="ingest-body">
-        <div class="ingest-heading">
-          <div><h2 id="ingest-title">添加文档</h2><p id="ingest-description">上传 PDF，转换后即可在文档库中搜索、阅读与查看图表。</p></div>
-          <button class="icon-btn" id="ingest-dismiss" type="button" aria-label="关闭添加文档">×</button>
+  <dialog id="library-dialog" class="library-dialog" aria-labelledby="library-title">
+    <div class="library-shell">
+      <header class="library-head">
+        <div class="library-heading">
+          <span class="side-label">DOCUMENT LIBRARY</span>
+          <h2 id="library-title">文档库管理</h2>
+          <p id="library-path" class="library-path" aria-live="polite"></p>
         </div>
-        <div class="ingest-target"><span>添加到</span><strong id="ingest-library"></strong></div>
-        <div id="ingest-options">
-          <div class="ingest-drop" id="ingest-drop">
-            <input id="ingest-files" class="sr-only" type="file" accept=".pdf,application/pdf" multiple aria-label="选择 PDF 文件">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M12 17v-5m-2 2 2-2 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <button class="ghost" id="ingest-pick" type="button">选择 PDF 文件</button>
-            <span>或拖放文件到这里</span>
-            <small id="ingest-limits">正在检查转换环境…</small>
-          </div>
-          <ul class="ingest-files" id="ingest-selected" aria-label="已选择的 PDF" hidden></ul>
-          <fieldset class="ingest-modes" id="ingest-modes"><legend>转换方式</legend>
-            <label class="ingest-option"><input type="radio" name="ingest-mode" value="basic" checked><span><strong>Basic <small>快速开始</small></strong><span>文本定位与页面预览</span><small data-ingest-reason="basic"></small></span></label>
-            <label class="ingest-option"><input type="radio" name="ingest-mode" value="marker"><span><strong>Marker</strong><span>识别段落、图表和公式，耗时较长</span><small data-ingest-reason="marker"></small></span></label>
-            <label class="ingest-option"><input type="radio" name="ingest-mode" value="both"><span><strong>两种方式</strong><span>先生成 Basic，再以 Marker 补充结构与图表</span><small data-ingest-reason="both"></small></span></label>
-          </fieldset>
-          <label class="ingest-replace"><input id="ingest-force" type="checkbox"><span><strong>替换已有产物</strong><small>默认跳过已有产物；勾选后重新生成同一 PDF 的所选类型。</small></span></label>
-        </div>
-        <div class="ingest-environment"><p id="ingest-env" aria-live="polite"></p><button class="ghost small" id="ingest-retry" type="button" hidden>重新检查</button></div>
-        <div id="ingest-progress" class="ingest-progress" hidden>
-          <div class="ingest-progress-head"><strong id="ingest-status" role="status"></strong><span id="ingest-count"></span></div>
-          <div class="meter" role="progressbar" id="ingest-meter" aria-label="文档转换进度" aria-valuemin="0" aria-valuemax="100"><span id="ingest-bar"></span></div>
-          <div class="ingest-list" id="ingest-list"></div>
-        </div>
-        <p id="ingest-error" class="dialog-error" role="alert" hidden></p>
-      </div>
-      <div class="dialog-actions">
-        <button class="ghost danger" id="ingest-cancel" type="button" hidden>停止任务</button>
-        <button class="ghost" id="ingest-close" type="button">关闭</button>
-        <button class="ghost" id="ingest-new" type="button" hidden>继续添加</button>
-        <button class="primary" id="ingest-start" type="submit" disabled>开始生成</button>
-      </div>
-    </form>
-  </dialog>
+        <button class="icon-btn" id="library-dismiss" type="button" aria-label="关闭文档库管理">×</button>
+      </header>
+      <div class="library-layout">
+        <nav class="library-nav" role="tablist" aria-label="文档库设置">
+          <button type="button" class="library-nav-item active" id="library-tab-overview" data-library-tab="overview" role="tab" aria-selected="true" aria-controls="library-panel-overview">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15.5H6.5A1.5 1.5 0 0 0 5 20V4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M5 19.5A1.5 1.5 0 0 1 6.5 18H19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span class="library-nav-text"><strong>当前数据</strong><small>文档与索引概览</small></span>
+          </button>
+          <button type="button" class="library-nav-item" id="ingest-open" data-library-tab="add" role="tab" aria-selected="false" aria-controls="library-panel-add">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <span class="library-nav-text"><strong>添加文档</strong><small>上传 PDF 并转换</small></span>
+            <span class="library-nav-badge" id="ingest-badge" hidden></span>
+          </button>
+          <button type="button" class="library-nav-item" id="index-open" data-library-tab="index" role="tab" aria-selected="false" aria-controls="library-panel-index">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            <span class="library-nav-text"><strong>索引管理</strong><small>语义索引与试查</small></span>
+          </button>
+        </nav>
+        <div class="library-panels">
+          <section class="library-panel library-overview" id="library-panel-overview" data-library-panel="overview" role="tabpanel" aria-labelledby="library-tab-overview">
+            <div class="library-facts" id="library-facts"></div>
+            <div class="library-overview-actions">
+              <button class="ghost small" id="library-switch" type="button">切换文档库或范围</button>
+              <button class="ghost small semantic-status" id="semantic-status" type="button" hidden>语义索引状态…</button>
+            </div>
+            <div class="library-search-row">
+              <div class="library-search">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <input id="document-search" class="document-search" type="search" placeholder="搜索论文标题…" aria-label="搜索论文">
+              </div>
+              <span id="document-count" class="library-count">—</span>
+            </div>
+            <div class="document-list" id="document-list"></div>
+          </section>
 
-  <dialog id="index-dialog" class="deepdocx-dialog index-dialog" aria-labelledby="index-title">
-    <div class="index-body">
-      <div class="ingest-heading"><div><h2 id="index-title">文档库索引</h2><p id="index-library"></p></div><button class="icon-btn" id="index-dismiss" type="button" aria-label="关闭索引管理">×</button></div>
-      <p id="index-summary" class="index-summary" role="status">正在读取索引状态…</p>
-      <div class="index-coverage" id="index-coverage"></div>
-      <details class="index-services"><summary>模型与服务状态</summary><div id="index-services"></div></details>
-      <fieldset class="index-scope"><legend>同步范围</legend>
-        <label><input type="radio" name="index-scope" value="selected" checked> 选择论文</label>
-        <label><input type="radio" name="index-scope" value="all"> 整个文档库</label>
-        <p id="index-selection-summary" role="status">请选择要同步的论文。</p>
-      </fieldset>
-      <details class="index-documents" id="index-selection" open><summary>选择论文与同步状态</summary>
-        <input id="index-document-filter" type="search" placeholder="搜索论文标题…" aria-label="搜索要同步的论文">
-        <ul id="index-documents"></ul>
-      </details>
-      <div class="index-settings">
-        <label class="ingest-replace"><input id="index-captions" type="checkbox"><span><strong>生成图片描述</strong><small>原始图注单独保留；视觉模型描述用于索引，并标记来源。</small></span></label>
-        <label class="dialog-field"><span>描述模型</span><select id="index-caption-model"><option value="qwen3.8-flash">Qwen3.8-Flash</option><option value="DeepSeek-V4.1-Flash-1017">DeepSeek-V4.1-Flash-1017</option></select></label>
+          <section class="library-panel library-add" id="library-panel-add" data-library-panel="add" role="tabpanel" aria-labelledby="ingest-open" hidden>
+            <form id="ingest-form" novalidate>
+              <div class="ingest-body">
+                <div class="ingest-heading">
+                  <div><h2 id="ingest-title">添加文档</h2><p id="ingest-description">上传 PDF，转换后即可在文档库中搜索、阅读与查看图表。</p></div>
+                </div>
+                <div class="ingest-target"><span>添加到</span><strong id="ingest-library"></strong></div>
+                <div id="ingest-options">
+                  <div class="ingest-drop" id="ingest-drop">
+                    <input id="ingest-files" class="sr-only" type="file" accept=".pdf,application/pdf" multiple aria-label="选择 PDF 文件">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M12 17v-5m-2 2 2-2 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <button class="ghost" id="ingest-pick" type="button">选择 PDF 文件</button>
+                    <span>或拖放文件到这里</span>
+                    <small id="ingest-limits">正在检查转换环境…</small>
+                  </div>
+                  <ul class="ingest-files" id="ingest-selected" aria-label="已选择的 PDF" hidden></ul>
+                  <fieldset class="ingest-modes" id="ingest-modes"><legend>转换方式</legend>
+                    <label class="ingest-option"><input type="radio" name="ingest-mode" value="basic" checked><span><strong>Basic <small>快速开始</small></strong><span>文本定位与页面预览</span><small data-ingest-reason="basic"></small></span></label>
+                    <label class="ingest-option"><input type="radio" name="ingest-mode" value="marker"><span><strong>Marker</strong><span>识别段落、图表和公式，耗时较长</span><small data-ingest-reason="marker"></small></span></label>
+                    <label class="ingest-option"><input type="radio" name="ingest-mode" value="both"><span><strong>两种方式</strong><span>先生成 Basic，再以 Marker 补充结构与图表</span><small data-ingest-reason="both"></small></span></label>
+                  </fieldset>
+                  <label class="ingest-replace"><input id="ingest-force" type="checkbox"><span><strong>替换已有产物</strong><small>默认跳过已有产物；勾选后重新生成同一 PDF 的所选类型。</small></span></label>
+                </div>
+                <div class="ingest-environment"><p id="ingest-env" aria-live="polite"></p><button class="ghost small" id="ingest-retry" type="button" hidden>重新检查</button></div>
+                <div id="ingest-progress" class="ingest-progress" hidden>
+                  <div class="ingest-progress-head"><strong id="ingest-status" role="status"></strong><span id="ingest-count"></span></div>
+                  <div class="meter" role="progressbar" id="ingest-meter" aria-label="文档转换进度" aria-valuemin="0" aria-valuemax="100"><span id="ingest-bar"></span></div>
+                  <div class="ingest-list" id="ingest-list"></div>
+                </div>
+                <p id="ingest-error" class="dialog-error" role="alert" hidden></p>
+              </div>
+              <div class="dialog-actions">
+                <button class="ghost danger" id="ingest-cancel" type="button" hidden>停止任务</button>
+                <button class="ghost" id="ingest-close" type="button">关闭</button>
+                <button class="ghost" id="ingest-new" type="button" hidden>继续添加</button>
+                <button class="primary" id="ingest-start" type="submit" disabled>开始生成</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="library-panel library-index" id="library-panel-index" data-library-panel="index" role="tabpanel" aria-labelledby="index-open" hidden>
+            <div class="index-body">
+              <div class="ingest-heading"><div><h2 id="index-title">文档库索引</h2><p id="index-library"></p></div></div>
+              <p id="index-summary" class="index-summary" role="status">正在读取索引状态…</p>
+              <div class="index-coverage" id="index-coverage"></div>
+              <details class="index-services"><summary>模型与服务状态</summary><div id="index-services"></div></details>
+              <fieldset class="index-scope"><legend>同步范围</legend>
+                <label><input type="radio" name="index-scope" value="selected" checked> 选择论文</label>
+                <label><input type="radio" name="index-scope" value="all"> 整个文档库</label>
+                <p id="index-selection-summary" role="status">请选择要同步的论文。</p>
+              </fieldset>
+              <details class="index-documents" id="index-selection" open><summary>选择论文与同步状态</summary>
+                <input id="index-document-filter" type="search" placeholder="搜索论文标题…" aria-label="搜索要同步的论文">
+                <ul id="index-documents"></ul>
+              </details>
+              <div class="index-settings">
+                <label class="ingest-replace"><input id="index-captions" type="checkbox"><span><strong>生成图片描述</strong><small>原始图注单独保留；视觉模型描述用于索引，并标记来源。</small></span></label>
+                <label class="dialog-field"><span>描述模型</span><select id="index-caption-model"><option value="qwen3.8-flash">Qwen3.8-Flash</option><option value="DeepSeek-V4.1-Flash-1017">DeepSeek-V4.1-Flash-1017</option></select></label>
+              </div>
+              <div id="index-progress" class="ingest-progress" hidden><div class="ingest-progress-head"><strong id="index-job-status"></strong><span id="index-job-count"></span></div><div class="meter"><span id="index-bar"></span></div><p id="index-job-detail"></p></div>
+              <details class="index-preview"><summary>试用语义检索</summary><form id="index-search-form"><label class="sr-only" for="index-query">检索文字</label><input id="index-query" placeholder="描述概念、图表内容，或搭配图片查找…" maxlength="12000"><label class="index-query-file">选择查询图片<input id="index-query-image" type="file" accept="image/png,image/jpeg,image/webp"></label><select id="index-query-kind" aria-label="检索表征"><option value="">全部表征</option><option value="text_block">文本块</option><option value="image">图像</option><option value="caption_original,caption_generated">图注／描述</option><option value="image_caption_original,image_caption_generated">原生图文联合</option></select><button class="ghost" id="index-search" type="submit">查找来源</button></form><div id="index-results" aria-live="polite"></div></details>
+              <p id="index-error" class="dialog-error" role="alert" hidden></p>
+            </div>
+            <div class="dialog-actions index-actions"><button class="ghost danger" id="index-stop" type="button" hidden>停止任务</button><button class="ghost" id="index-refresh" type="button">刷新</button><button class="ghost" id="index-rebuild" type="button">重新生成</button><button class="primary" id="index-sync" type="button" disabled>同步索引</button></div>
+          </section>
+        </div>
       </div>
-      <div id="index-progress" class="ingest-progress" hidden><div class="ingest-progress-head"><strong id="index-job-status"></strong><span id="index-job-count"></span></div><div class="meter"><span id="index-bar"></span></div><p id="index-job-detail"></p></div>
-      <details class="index-preview"><summary>试用语义检索</summary><form id="index-search-form"><label class="sr-only" for="index-query">检索文字</label><input id="index-query" placeholder="描述概念、图表内容，或搭配图片查找…" maxlength="12000"><label class="index-query-file">选择查询图片<input id="index-query-image" type="file" accept="image/png,image/jpeg,image/webp"></label><select id="index-query-kind" aria-label="检索表征"><option value="">全部表征</option><option value="text_block">文本块</option><option value="image">图像</option><option value="caption_original,caption_generated">图注／描述</option><option value="image_caption_original,image_caption_generated">原生图文联合</option></select><button class="ghost" id="index-search" type="submit">查找来源</button></form><div id="index-results" aria-live="polite"></div></details>
-      <p id="index-error" class="dialog-error" role="alert" hidden></p>
     </div>
-    <div class="dialog-actions"><button class="ghost danger" id="index-stop" type="button" hidden>停止任务</button><button class="ghost" id="index-refresh" type="button">刷新</button><button class="ghost" id="index-rebuild" type="button">重新生成</button><button class="primary" id="index-sync" type="button" disabled>同步索引</button></div>
   </dialog>
 
   <div class="modal-backdrop" id="permission" hidden>
@@ -352,6 +395,8 @@
   </template>
 
   <script src="/static/vendor/mermaid.min.js" defer></script>
+  <script src="/static/vendor/katex/katex.min.js" defer></script>
+  <script src="/static/vendor/katex/auto-render.min.js" defer></script>
   <script src="/static/diagrams.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/indexes.js" defer></script>

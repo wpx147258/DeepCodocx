@@ -12,7 +12,8 @@ basic ingestion.
 
 ## Add documents in the Web interface
 
-1. Enter DeepDocx and click **添加文档** (Add documents). Confirm the target library.
+1. Enter DeepDocx, open the sidebar's **文档库管理** (Document library management),
+   then choose **添加文档** (Add documents). Confirm the target library.
 2. Select or drop PDFs. Remove files or add more from the file list; the dialog
    shows the current file count and size limits.
 3. Choose an available conversion mode. Unconfigured modes are disabled. If the
@@ -26,12 +27,12 @@ work while keeping complete renditions already published. Reloading during an
 upload cannot recover the browser's file stream: stop that job and select the
 files again.
 
-Chat and document navigation scroll independently of the Model, Permissions,
-and Context controls at the bottom of the sidebar.
+The chat list scrolls independently of the Permissions and Context controls at
+the bottom of the sidebar; model selection lives in the top-right corner.
 
 ![Add documents](web/deepdocx-ingest.png)
 
-[Mobile example](web/deepdocx-ingest-mobile.png) · [Dark theme](web/deepdocx-ingest-dark.png) · [Sidebar with a long library](web/deepdocx-sidebar.png)
+[Mobile example](web/deepdocx-ingest-mobile.png) · [Dark theme](web/deepdocx-ingest-dark.png) · [Library entry and permissions](web/deepdocx-sidebar.png)
 
 ## Conversion modes and existing files
 

@@ -100,7 +100,9 @@ def main():
                 page.on("pageerror", lambda exc: errors.append(str(exc)))
                 page.goto(f"http://127.0.0.1:{port}/?token=browser-token")
                 expect(page.locator(".brand-name")).to_have_text("DeepDocx")
+                page.locator("#library-open").click()
                 page.locator("#index-open").click()
+                expect(page.locator("#library-panel-index")).to_be_visible()
                 expect(page.locator("#index-summary")).to_contain_text("0 / 2")
                 expect(page.locator("#index-sync")).to_be_disabled()
                 page.locator('input[name="index-scope"][value="all"]').check()
@@ -124,7 +126,8 @@ def main():
                 # the last view showed the full-library option.
                 page.locator('input[name="index-scope"][value="all"]').check()
                 expect(page.locator("#index-sync")).to_have_text("同步全库 2 篇")
-                page.locator("#index-dismiss").click()
+                page.locator("#library-dismiss").click()
+                page.locator("#library-open").click()
                 page.locator("#index-open").click()
                 expect(page.locator('input[name="index-scope"][value="selected"]')).to_be_checked()
                 expect(page.locator("#index-sync")).to_have_text("同步 1 篇")
@@ -154,8 +157,9 @@ def main():
                 page.locator("#index-search").click()
                 expect(page.locator(".index-result")).to_have_count(2)
                 page.locator(".index-result button").first.click()
-                expect(page.locator("#index-dialog")).not_to_be_visible()
+                expect(page.locator("#library-dialog")).not_to_be_visible()
                 expect(page.locator("#evidence-panel")).to_be_visible()
+                page.locator("#library-open").click()
                 page.locator("#index-open").click()
                 expect(page.locator("#index-summary")).to_contain_text("1 / 2")
                 calls = len(requests)
@@ -183,10 +187,11 @@ def main():
                     page.screenshot(
                         path=str(args.output / "deepdocx-index-mobile.png"), animations="disabled"
                     )
-                page.locator("#index-dismiss").click()
+                page.locator("#library-dismiss").click()
                 page.reload()
                 page.locator("#menu").click()
                 expect(page.locator("#mode-toggle")).to_be_in_viewport()
+                page.locator("#library-open").click()
                 page.locator("#index-open").click()
                 expect(page.locator("#index-summary")).to_contain_text("1 / 2")
                 assert any(

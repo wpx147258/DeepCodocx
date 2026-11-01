@@ -64,6 +64,19 @@ DeepSeek 预设默认开启。支持签名推理的会话会在工具循环中�
 `prompt_caching = true` 会给静态 system 前缀和工具 schema 添加缓存断点。Anthropic
 预设启用，其他兼容端点默认关闭；应先确认端点接受该参数。
 
+## Web
+
+```toml
+[web]
+port = 8765
+```
+
+`dcx web` 默认使用该端口。`dcx web --auto-port` 会从该端口开始选择：其它工作区
+占用时依次尝试下一个端口；如果当前工作目录已经有运行中的实例，则打印它的地址而
+不重复启动。如需在同一目录强制再启动一个实例，显式运行
+`dcx web --port 8766 --no-open`（不经过自动选择）。实例记录位于
+`$XDG_DATA_HOME/dcx/web/instances/`，不包含 token。
+
 ## 文档库
 
 ```toml

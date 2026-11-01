@@ -433,3 +433,48 @@ def test_max_turns_normal_values_pass(
     result = CliRunner().invoke(main, args, env=_env(tmp_path))
     assert result.exit_code == 0
     assert captured["options"].max_turns == expected
+
+
+def test_web_auto_port_reports_existing_workspace(tmp_path: Path, monkeypatch) -> None:
+    from dcx.web.instances import PortChoice, WebInstance
+
+    existing = WebInstance(pid=123, host="127.0.0.1", port=8765, cwd=str(tmp_path))
+    monkeypatch.setattr(
+        "dcx.web.instances.select_port",
+        lambda *args, **kwargs: PortChoice(8765, existing),
+    )
+    monkeypatch.setattr(
+        "dcx.entry.build_runtime",
+        lambda options: (_ for _ in ()).throw(AssertionError("must not build")),
+    )
+    result = CliRunner().invoke(main, ["web", "--auto-port"], env=_env(tmp_path))
+    assert result.exit_code == 0
+    assert "already running" in result.output
+    assert "http://127.0.0.1:8765/" in result.output
+
+
+def test_web_auto_port_uses_config_and_selected_port(tmp_path: Path, monkeypatch) -> None:
+    from dcx.web.instances import PortChoice
+
+    monkeypatch.chdir(tmp_path)
+    calls: dict[str, object] = {}
+    seen: dict[str, object] = {}
+
+    def fake_select(data_dir, start, cwd, *, host="127.0.0.1"):
+        calls.update(data_dir=data_dir, start=start, cwd=cwd, host=host)
+        return PortChoice(8767)
+
+    monkeypatch.setattr("dcx.web.instances.select_port", fake_select)
+    monkeypatch.setattr("dcx.entry.build_runtime", lambda options: SimpleNamespace())
+    monkeypatch.setattr(
+        "dcx.web.server.serve",
+        lambda bundle, asker, **kwargs: seen.update(kwargs),
+    )
+    result = CliRunner().invoke(
+        main, ["web", "--auto-port", "--no-open"], env=_env(tmp_path)
+    )
+    assert result.exit_code == 0
+    assert calls["start"] == 8765
+    assert Path(calls["cwd"]).resolve() == tmp_path.resolve()
+    assert seen["port"] == 8767
+    assert seen["open_browser"] is False

@@ -40,15 +40,18 @@ Click the diagram or Expand to inspect it with zoom, drag, Fit, and 100% control
 Escape closes the viewer. Diagram colors follow the workspace theme.
 
 - Streaming text, collapsible reasoning, and tool cards with actual inputs and
-  outputs.
-- Browser approvals, Ask / Auto permissions, model switching, and context
-  readouts.
+  outputs. Reloading reattaches to the in-flight turn without losing partial
+  output; reconnect retries update one notice with the current attempt count.
+- Markdown and LaTeX formulas in messages (`$...$`, `$$...$$`, `\(...\)`,
+  `\[...\]`) render locally; write `\$` for a literal dollar sign.
+- Browser approvals, Ask / Auto permissions, top-right model selection, and
+  context readouts.
 - Session search, rename, archive, restore, and Markdown / JSON export.
 - Paste, drop, or attach PNG / JPEG / GIF / WebP images: up to four per message,
   5 MiB each.
 - DeepDocx can use chat attachments for image or mixed retrieval. Tool cards show
   a few sources and coverage; the agent reads original text/images as needed.
-  A sidebar badge reports semantic index coverage.
+  The library manager reports semantic index coverage.
 - Edit and resend, regenerate, and rewind conversation or code independently,
   with file conflicts and diffs available before restoration.
 - Stop the current task, compact context, and view shortcuts with `Ctrl/⌘ + /`.
@@ -61,17 +64,21 @@ the file, process, or external side effects of Bash commands.
 History inherited by a DeepDocx fork is read-only. Rewind starts at the new
 session's fork boundary.
 
-The default address is `127.0.0.1:8765`. Non-loopback binds automatically require
-a token; `--token` sets one explicitly. The page uses CSP, and API requests use
-`X-DCX-Token`. The legacy `X-CLI-Agent-Token` header remains accepted; when the
-new header is present, it takes precedence. Pair network exposure with an
-authenticated proxy.
+The default address is `127.0.0.1:8765`. `dcx web --auto-port` starts at
+`[web] port`, increments when another workspace owns the port, and reports the
+running address when this working directory already has a server. Non-loopback
+binds automatically require a token; `--token` sets one explicitly. The page
+uses CSP, and API requests use `X-DCX-Token`. The legacy `X-CLI-Agent-Token`
+header remains accepted; when the new header is present, it takes precedence.
+Pair network exposure with an authenticated proxy.
 
 ## Document and index administration
 
-In DeepDocx, **添加文档** (Add documents) uploads PDFs and builds bundles.
-**索引管理** (Index management) synchronizes multimodal indexes, selects captions,
-stops index jobs, and previews text/image queries. Both run as independent
+In DeepDocx, the sidebar's **文档库管理** (Document library management) opens a
+settings window. **当前数据** provides an overview and document search;
+**添加文档** (Add documents) uploads PDFs and builds bundles; **索引管理**
+(Index management) synchronizes multimodal indexes, selects captions, stops
+index jobs, and previews text/image queries. Both run as independent
 background tasks. Closing a dialog keeps them running; stopping an agent turn
 does not cancel ingestion or indexing.
 

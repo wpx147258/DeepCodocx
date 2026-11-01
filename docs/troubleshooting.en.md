@@ -12,14 +12,24 @@ uv run dcx web --provider deepseek --no-open
 
 ## Address already in use
 
-Another process is listening on the port. Keep it running and choose a different
-port for DeepCodocx:
+Another process is listening on the port. The default comes from `[web] port`;
+you can choose another port explicitly:
 
 ```bash
 uv run dcx web --provider deepseek --port 8766 --no-open
 ```
 
-On Linux / WSL, `ss -ltnp 'sport = :8765'` shows the current listener.
+or let dcx choose:
+
+```bash
+uv run dcx web --provider deepseek --auto-port --no-open
+```
+
+Auto mode starts at `[web] port`, increments when another workspace owns the
+port, and reports the running address when this working directory already has a
+server. A server started by an older release has no instance record, so auto
+mode only skips its port; restart it once to make it recognizable. On Linux /
+WSL, `ss -ltnp 'sport = :8765'` shows the current listener.
 
 ## Virtual environment breaks after moving the project
 

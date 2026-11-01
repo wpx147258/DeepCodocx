@@ -13,6 +13,7 @@ import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import uvicorn
 
@@ -96,11 +97,29 @@ def main() -> None:
                     }
                     for i in range(76)
                 ]
-                page.route(
-                    "**/api/documents?**", lambda route: route.fulfill(json={"documents": many})
-                )
+                def filtered_documents(route):
+                    query = parse_qs(urlparse(route.request.url).query).get("q", [""])[0].casefold()
+                    selected = [
+                        doc
+                        for doc in many
+                        if query in doc["title"].casefold() or query in doc["doc_id"].casefold()
+                    ]
+                    route.fulfill(json={"documents": selected})
+
+                page.route("**/api/documents?**", filtered_documents)
                 page.reload()
+                page.locator("#library-open").click()
+                expect(page.locator("#library-dialog")).to_be_visible()
                 expect(page.locator(".document-item")).to_have_count(76)
+                page.locator("#document-search").fill("Paper 7")
+                expect(page.locator(".document-item")).to_have_count(7)
+                page.locator("#document-search").fill("")
+                expect(page.locator(".document-item")).to_have_count(76)
+                if output:
+                    page.screenshot(
+                        path=str(output / "deepdocx-library.png"), animations="disabled"
+                    )
+                page.locator("#library-dismiss").click()
                 for size in ((1280, 720), (1000, 600), (800, 600), (390, 700)):
                     page.set_viewport_size({"width": size[0], "height": size[1]})
                     if size[0] <= 900:
@@ -123,7 +142,9 @@ def main() -> None:
                 page.set_viewport_size({"width": 1280, "height": 900})
                 page.unroute("**/api/documents?**")
                 page.reload()
+                page.locator("#library-open").click()
                 page.locator("#ingest-open").click()
+                expect(page.locator("#library-panel-add")).to_be_visible()
                 expect(page.locator("#ingest-env")).to_contain_text("转换在后台执行")
                 expect(page.locator("#ingest-start")).to_be_disabled()
                 expect(page.locator('input[name="ingest-mode"][value="marker"]')).to_be_disabled()
@@ -163,6 +184,7 @@ def main() -> None:
                 page.locator("#ingest-close").click()
                 # An environment request failure must fail closed and be retryable.
                 page.route("**/api/ingest/environment", lambda route: route.abort())
+                page.locator("#library-open").click()
                 page.locator("#ingest-open").click()
                 expect(page.locator("#ingest-env")).to_contain_text("无法检查")
                 page.locator("#ingest-files").set_input_files(
@@ -219,21 +241,26 @@ def main() -> None:
                 page.locator("#ingest-start").click()
                 page.locator("#ingest-form").dispatch_event("submit")
                 expect(page.locator("#ingest-progress")).to_be_visible()
-                page.locator("#ingest-dismiss").click()
+                page.locator("#library-dismiss").click()
+                page.locator("#library-open").click()
                 page.locator("#ingest-open").click()
                 expect(page.locator("#ingest-status")).to_have_text("文档已添加", timeout=20000)
+                page.locator("#library-tab-overview").click()
                 expect(page.locator(".document-item")).to_have_count(2)
+                page.locator("#ingest-open").click()
                 expect(page.locator("#ingest-new")).to_be_enabled()
                 jobs = host.ingest.list()
                 assert len(jobs) == 1 and jobs[0]["status"] == "succeeded"
                 assert DocumentLibrary(corpus).search("acceptance")["hits"]
                 page.reload()
+                page.locator("#library-open").click()
                 page.locator("#ingest-open").click()
                 # Recover an active server-side job after a browser reload.
                 pending = host.ingest.create_job(bundle.libraries.selected_id(), corpus, "basic")
                 host.ingest.add_file(pending["id"], "pending.pdf", small_pdf())
-                page.locator("#ingest-dismiss").click()
+                page.locator("#library-dismiss").click()
                 page.reload()
+                page.locator("#library-open").click()
                 page.locator("#ingest-open").click()
                 expect(page.locator("#ingest-status")).to_have_text("正在上传")
                 page.locator("#ingest-cancel").click()

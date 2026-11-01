@@ -9,9 +9,9 @@ import pytest
 
 from dcx.assembly import RuntimeBundle
 from dcx.config import AppPaths, load_config
-from dcx.messages import TextBlock, assistant_message, user_message
+from dcx.messages import TextBlock, Usage, assistant_message, user_message
 from dcx.permissions.policy import PermissionRequest
-from dcx.providers.base import ModelProfile
+from dcx.providers.base import ModelProfile, ResponseCompleted, TextDelta
 from dcx.session.meta import read_session_meta, update_session_meta
 from dcx.session.paths import SessionPaths
 from dcx.session.store import SessionStore
@@ -976,4 +976,69 @@ async def test_start_turn_reserves_busy_synchronously(tmp_path: Path) -> None:
     with pytest.raises(TurnBusy):
         host.start_turn("again")
     await host.cancel_turn()
+    await bundle.runtime.close()
+
+
+class _SlowProvider:
+    """Emit one delta, block, then complete so a detach/replay is observable."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.delta_sent = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(self, request):
+        self.started.set()
+        yield TextDelta("partial")
+        self.delta_sent.set()
+        await self.release.wait()
+        yield ResponseCompleted(
+            message=assistant_message([TextBlock("partial")]),
+            stop_reason="end_turn",
+            raw_stop_reason="end_turn",
+            usage=Usage(input_tokens=3, output_tokens=2),
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _Request:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+async def test_reload_detaches_without_cancelling_and_replays(tmp_path: Path) -> None:
+    provider = _SlowProvider()
+    bundle = _bundle(tmp_path, provider)
+    host = WebHost(bundle)
+    queue = host.start_turn("hi")
+    await asyncio.wait_for(provider.started.wait(), 1)
+    await asyncio.wait_for(provider.delta_sent.wait(), 1)
+
+    stream = host.stream_started(queue, _Request())
+    first = await asyncio.wait_for(stream.__anext__(), 1)
+    assert '"turn_start"' in first
+    await stream.aclose()
+
+    # A reload only detaches the view; the turn is still running.
+    assert host.busy is True
+    payload = host.state_payload()
+    assert payload["active_turn"]["base"] == 0
+
+    replay, attached = host.attach_turn()
+    assert attached is not None
+    assert any(item["type"] == "text" and item["text"] == "partial" for item in replay)
+
+    provider.release.set()
+    seen: list[dict] = []
+    while True:
+        item = await asyncio.wait_for(attached.get(), 1)
+        if item is web_server._END:
+            break
+        seen.append(item)
+    assert any(item["type"] == "done" for item in seen)
+    assert host.busy is False
+    assert host.active_turn_payload() is None
+    assert host.runtime.messages[-1].text() == "partial"
     await bundle.runtime.close()

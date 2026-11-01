@@ -29,6 +29,7 @@ uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodo
 uv run --with playwright python -m tests.e2e.semantic_smoke --output /tmp/deepcodocx-index
 uv run --with playwright python -m tests.e2e.mermaid_smoke --output /tmp/deepcodocx-mermaid
 uv run --with playwright python -m tests.e2e.document_search_smoke --output /tmp/deepcodocx-document-chat
+uv run --with playwright python -m tests.e2e.streaming_smoke --output /tmp/deepcodocx-stream
 ```
 
 该验收使用脚本 provider，运行真实 Web 服务、stdio MCP 和浏览器，检查旧版浏览器设置迁移、文档库默认值、
@@ -41,6 +42,8 @@ Mermaid 验收使用真实渲染器检查图表／源码切换、复制、缩放
 回退、流式回复和历史恢复；不需要网络模型服务。
 文档对话验收使用真实 runtime／stdio MCP 和本地推理 fixture，检查附件引用、目标路由、
 紧凑来源卡片、覆盖徽标、回读原图、主题与历史恢复。
+流式验收检查刷新页面后重新接续正在输出的回合，断网重试提示保持单一条目并更新次数，
+以及 Markdown 中的 LaTeX 公式在本地渲染。
 输出目录中的截图用于界面核对。`web_smoke` 附加 `--library /path/to/paper-bundles` 可检查包含
 MEMORYVLA Marker 产物的真实本地语料，目录只读访问。
 

@@ -346,3 +346,35 @@ def test_non_positive_max_output_tokens_is_rejected(
     config = load_config(cwd=tmp_path, env=_env(tmp_path))
     with pytest.raises(ConfigError, match="max_output_tokens"):
         build_profile(config, config.providers["deepseek"], "deepseek-chat")
+
+
+def test_web_port_defaults_and_overrides(tmp_path: Path) -> None:
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.web.port == 8765
+
+    config_dir = tmp_path / "config" / "dcx"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text("[web]\nport = 8766\n", encoding="utf-8")
+    config = load_config(cwd=tmp_path, env=_env(tmp_path))
+    assert config.web.port == 8766
+
+
+@pytest.mark.parametrize("value", ["0", "65536", "true", '"8765"'])
+def test_invalid_web_port_is_rejected(tmp_path: Path, value: str) -> None:
+    config_dir = tmp_path / "config" / "dcx"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        f"[web]\nport = {value}\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError, match="port"):
+        load_config(cwd=tmp_path, env=_env(tmp_path))
+
+
+def test_unknown_web_setting_is_rejected(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config" / "dcx"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        "[web]\nhost = \"127.0.0.1\"\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError, match="Unknown web settings"):
+        load_config(cwd=tmp_path, env=_env(tmp_path))

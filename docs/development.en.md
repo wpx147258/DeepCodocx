@@ -32,6 +32,7 @@ uv run --with playwright python -m tests.e2e.ingest_smoke --output /tmp/deepcodo
 uv run --with playwright python -m tests.e2e.semantic_smoke --output /tmp/deepcodocx-index
 uv run --with playwright python -m tests.e2e.mermaid_smoke --output /tmp/deepcodocx-mermaid
 uv run --with playwright python -m tests.e2e.document_search_smoke --output /tmp/deepcodocx-document-chat
+uv run --with playwright python -m tests.e2e.streaming_smoke --output /tmp/deepcodocx-stream
 ```
 
 This check uses a scripted provider with the real Web server, stdio MCP, and
@@ -54,6 +55,9 @@ restoration without a network model service.
 Document chat acceptance uses the real runtime and stdio MCP with local inference
 fixtures to cover attachment references, target routing, compact cards, coverage
 badges, image source reading, themes, and restored history.
+Streaming acceptance checks that a page reload reattaches to the in-flight turn,
+that reconnect retry notices stay in one entry and update their attempt count,
+and that Markdown LaTeX formulas render locally.
 
 Screenshots in the output directory support visual inspection. For `web_smoke`, add
 `--library /path/to/paper-bundles` to check a real local corpus containing

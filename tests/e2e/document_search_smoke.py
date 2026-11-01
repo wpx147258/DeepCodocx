@@ -149,11 +149,12 @@ def main():
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(f"http://127.0.0.1:{port}/")
+                page.locator("#library-open").click()
                 expect(page.locator("#semantic-status")).to_have_text("语义索引 1/1", timeout=20000)
                 assert not fake.requests
                 page.locator("#semantic-status").click()
-                expect(page.locator("#index-dialog")).to_be_visible()
-                page.locator("#index-dismiss").click()
+                expect(page.locator("#library-panel-index")).to_be_visible()
+                page.locator("#library-dismiss").click()
                 page.locator("#input").fill("请从库中用语义相关原文解释记忆")
                 page.locator("#send").click()
                 expect(page.locator("#messages")).to_contain_text("已读取原文", timeout=25000)

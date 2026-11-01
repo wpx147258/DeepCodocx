@@ -17,6 +17,11 @@ Python server. You can select `deep-docs-unified/data` or its
 `data/paper-bundles` directory directly. Select individual documents to narrow the
 scope; leaving the selection empty uses the whole library.
 
+Inside the workspace, the sidebar's **文档库管理** (Document library management)
+gathers current data, document search, ingestion, and index management.
+
+![Document library management](web/deepdocx-library.png)
+
 You can also start with an existing library directly:
 
 ```bash
@@ -94,7 +99,8 @@ the representations into four families:
 | Native image–text combinations | Image + original caption, image + generated description | Combine visual and textual clues |
 
 Set `GITEE_API_KEY` and `DASHSCOPE_API_KEY` in the terminal launching Web, enter
-DeepDocx, and open **索引管理** (Index management) beside the library. Choose
+DeepDocx, and open **文档库管理** (Document library management) → **索引管理**
+(Index management) in the sidebar. Choose
 which papers to synchronize using the searchable selection, then choose whether
 to generate descriptions and select their model. Full-library synchronization
 is an explicit option; a single-paper job preserves other indexed papers.
@@ -198,8 +204,8 @@ targets cannot combine with advanced representation filtering. Local paths are
 bounded to the workspace, selected library, or current session, with no remote URLs.
 
 Files live under the current session's `attachments/`; resume and fork preserve
-references without rewriting original messages/history. The sidebar's semantic
-coverage badge opens index management. Tool cards show excerpts and source
+references without rewriting original messages/history. The library manager's
+semantic coverage badge opens index management. Tool cards show excerpts and source
 buttons, with raw JSON available on expansion.
 
 The document service can also run independently for other MCP clients:

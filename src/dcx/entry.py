@@ -17,6 +17,7 @@ from .assembly import BuildOptions, RuntimeBundle, build_runtime
 from .cli import indexes as _indexes  # noqa: F401 - registers document index commands
 from .cli.ingest import docs as docs_group
 from .cli.repl import RichAsker, run_print, run_repl
+from .config import load_config
 from .errors import DcxError
 
 
@@ -195,10 +196,12 @@ def _run_web(
     common: dict[str, Any],
     *,
     host: str,
-    port: int,
+    port: int | None,
     open_browser: bool,
     token: str | None = None,
+    auto_port: bool = False,
 ) -> int:
+    from .web.instances import select_port
     from .web.server import WebAsker, serve
 
     _configure_logging(common["verbose"])
@@ -209,6 +212,36 @@ def _run_web(
         memory_enabled=False if common["no_memory"] else None,
         asker=asker,
     )
+    # Resolve the port before building a runtime. A same-workspace request must
+    # report the running server without creating an empty session directory.
+    try:
+        config = load_config(options.config_path, cwd=options.cwd, env=options.env)
+    except DcxError as exc:
+        click.echo(f"error: {exc}", err=True)
+        return 1
+    start_port = port if port is not None else config.web.port
+    if auto_port:
+        try:
+            choice = select_port(
+                config.paths.data_dir,
+                start_port,
+                config.paths.cwd,
+                host=host,
+            )
+        except ValueError as exc:
+            click.echo(f"error: {exc}", err=True)
+            return 1
+        if choice.existing is not None:
+            click.echo(
+                "dcx web is already running for this directory: "
+                f"{choice.existing.url} "
+                "(use the token printed by that process if required)"
+            )
+            return 0
+        port = choice.port
+    else:
+        port = start_port
+
     bundle = _load(options)
 
     def session_factory(session_id: str | None) -> RuntimeBundle:
@@ -296,14 +329,21 @@ def run(ctx: click.Context, **common: Any) -> None:
     "--host",
     default="127.0.0.1",
     show_default=True,
-    help="Bind address. The web UI has no authentication.",
+    help="Bind address. Non-loopback binds require an API token.",
 )
 @click.option(
     "--port",
     type=click.IntRange(1, 65_535),
-    default=8765,
-    show_default=True,
-    help="Port for the local web client.",
+    default=None,
+    help="Port for the local web client (default: web.port in config, 8765).",
+)
+@click.option(
+    "--auto-port",
+    is_flag=True,
+    help=(
+        "Start at web.port and increment when another workspace owns the port; "
+        "report the running server when this workspace already has one."
+    ),
 )
 @click.option(
     "--open/--no-open",
@@ -324,7 +364,8 @@ def run(ctx: click.Context, **common: Any) -> None:
 def web(
     ctx: click.Context,
     host: str,
-    port: int,
+    port: int | None,
+    auto_port: bool,
     open_browser: bool,
     token: str | None,
     **common: Any,
@@ -338,5 +379,6 @@ def web(
             port=port,
             open_browser=open_browser,
             token=token,
+            auto_port=auto_port,
         )
     )

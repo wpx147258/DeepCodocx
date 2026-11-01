@@ -10,7 +10,7 @@
 
 ## 在 Web 中添加
 
-1. 进入 DeepDocx 工作区，点击侧栏 **添加文档**，确认目标文档库。
+1. 进入 DeepDocx 工作区，点击侧栏 **文档库管理**，再进入 **添加文档**，确认目标文档库。
 2. 选择或拖入 PDF。文件清单支持移除和继续添加，并显示当前文件数量、大小限制。
 3. 选择可用的转换方式；未配置的方式会禁用。环境检查失败时，修复连接后点击 **重新检查**。
 4. 点击 **开始生成**，查看各文件、各类产物的结果。
@@ -19,11 +19,11 @@
 恢复当前文档库尚未结束的任务。**停止任务** 会取消尚未完成的工作；已经发布的完整产物
 会保留。上传中刷新页面无法恢复浏览器里的文件流，可以停止该任务，再重新选择文件。
 
-侧栏的会话和文档列表单独滚动，Model、Permissions 和 Context 保持在底部。
+侧栏的会话列表单独滚动，Permissions 和 Context 保持在底部；模型选择位于页面右上角。
 
 ![添加文档](web/deepdocx-ingest.png)
 
-[移动端示例](web/deepdocx-ingest-mobile.png) · [暗色主题](web/deepdocx-ingest-dark.png) · [长文档列表与权限区](web/deepdocx-sidebar.png)
+[移动端示例](web/deepdocx-ingest-mobile.png) · [暗色主题](web/deepdocx-ingest-dark.png) · [文档库入口与权限区](web/deepdocx-sidebar.png)
 
 ## 转换方式与冲突处理
 

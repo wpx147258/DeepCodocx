@@ -12,13 +12,22 @@ uv run dcx web --provider deepseek --no-open
 
 ## address already in use
 
-另一个进程已经监听该端口。可以保留它，为 DeepCodocx 选择另一个端口：
+另一个进程已经监听该端口。默认端口由 `[web] port` 配置；也可以手动换一个端口：
 
 ```bash
 uv run dcx web --provider deepseek --port 8766 --no-open
 ```
 
-在 Linux / WSL 上，`ss -ltnp 'sport = :8765'` 可查看当前监听者。
+或让 dcx 自动选择：
+
+```bash
+uv run dcx web --provider deepseek --auto-port --no-open
+```
+
+自动模式从 `[web] port` 开始，其它工作区占用时递增；同一工作目录已有服务时直接
+打印其地址，不再重复启动。由旧版本启动、尚未登记实例记录的进程只会让自动模式
+跳过其端口；重启一次后即可识别。Linux / WSL 上可用
+`ss -ltnp 'sport = :8765'` 查看当前监听者。
 
 ## 移动项目后虚拟环境失效
 

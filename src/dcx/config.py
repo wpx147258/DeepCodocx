@@ -141,6 +141,13 @@ class IngestConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WebConfig:
+    """Local web host defaults for bare launchers and auto-port selection."""
+
+    port: int = 8765
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     paths: AppPaths
     default_provider: str
@@ -160,6 +167,7 @@ class AppConfig:
     ingest: IngestConfig = field(default_factory=IngestConfig)
     index: IndexConfig = field(default_factory=IndexConfig)
     caption: CaptionConfig = field(default_factory=CaptionConfig)
+    web: WebConfig = field(default_factory=WebConfig)
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -343,6 +351,7 @@ def load_config(
         index, caption = parse_settings(deepdocx.get("index", {}), deepdocx.get("caption", {}))
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
+    web = _parse_web(data.get("web", {}))
 
     return AppConfig(
         paths=paths,
@@ -363,7 +372,24 @@ def load_config(
         ingest=ingest,
         index=index,
         caption=caption,
+        web=web,
     )
+
+
+def _parse_web(raw: object) -> WebConfig:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigError("[web] must be a table")
+    unknown = set(raw) - {"port"}
+    if unknown:
+        raise ConfigError(f"Unknown web settings: {', '.join(sorted(unknown))}")
+    port = _optional_int(raw, "port")
+    if port is None:
+        port = 8765
+    if not 1 <= port <= 65_535:
+        raise ConfigError("web.port must be between 1 and 65535")
+    return WebConfig(port=port)
 
 
 def _parse_ingest(raw: object) -> IngestConfig:

@@ -248,6 +248,16 @@
       codes.push(code);
       return `\u0001${codes.length - 1}\u0001`;
     });
+    // Protect math from emphasis/link rewriting. KaTeX auto-render runs after
+    // the HTML is inserted, so the delimiters must survive intact.
+    const maths = [];
+    source = source.replace(
+      /(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$|(?<!\\)\$([^$\n]+?)(?<!\\)\$|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g,
+      (match) => {
+        maths.push(match);
+        return `\u0002${maths.length - 1}\u0002`;
+      }
+    );
     let out = escapeHtml(source);
     out = out.replace(
       /\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
@@ -259,6 +269,9 @@
     out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     out = out.replace(/\u0001(\d+)\u0001/g, (_, index) => {
       return `<code>${escapeHtml(codes[Number(index)])}</code>`;
+    });
+    out = out.replace(/\u0002(\d+)\u0002/g, (_, index) => {
+      return `<span class="math-source">${escapeHtml(maths[Number(index)])}</span>`;
     });
     return out;
   }
@@ -278,6 +291,33 @@
 
   function hydrateMermaid(root) {
     window.DcxDiagrams?.hydrate(root);
+  }
+
+  function hydrateMath(root) {
+    if (!root || typeof window.renderMathInElement !== "function") return;
+    const text = root.textContent || "";
+    if (!text.includes("$") && !text.includes("\\(") && !text.includes("\\[")) return;
+    try {
+      window.renderMathInElement(root, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\begin{equation}", right: "\\end{equation}", display: true },
+          { left: "\\begin{align}", right: "\\end{align}", display: true },
+          { left: "\\begin{alignat}", right: "\\end{alignat}", display: true },
+          { left: "\\begin{gather}", right: "\\end{gather}", display: true },
+          { left: "\\begin{CD}", right: "\\end{CD}", display: true },
+        ],
+        throwOnError: false,
+        strict: false,
+        processEscapes: true,
+        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+      });
+    } catch (_) {
+      // Leave the source visible if the renderer cannot handle a fragment.
+    }
   }
 
   function refreshMermaid() {
@@ -434,7 +474,11 @@
     if (!text.trim() && !images.length) return;
     const row = h("div", "msg msg-user");
     const body = h("div", "msg-body");
-    if (text.trim()) body.appendChild(h("div", "bubble", text));
+    if (text.trim()) {
+      const bubble = h("div", "bubble", text);
+      body.appendChild(bubble);
+      hydrateMath(bubble);
+    }
     for (const image of images) {
       const img = document.createElement("img");
       img.className = "bubble-image";
@@ -585,6 +629,7 @@
         node.innerHTML = renderMarkdown(block.text);
         shell.segments.appendChild(node);
         hydrateMermaid(node);
+        hydrateMath(node);
       } else if (block.type === "reasoning") {
         if (!block.text) continue;
         shell.segments.appendChild(addThinking(block.text, false));
@@ -719,6 +764,7 @@
       error: false,
       paintQueued: false,
       pending: null,
+      retryNote: null,
     };
     turn.pending = pendingIndicator();
     shell.segments.appendChild(turn.pending);
@@ -756,7 +802,10 @@
     const live = turn.shell.row.classList.contains("streaming");
     // Render after streaming settles; also cover a segment flushed before a tool.
     for (const node of nodes) {
-      if (!live || node !== turn.currentText) hydrateMermaid(node);
+      if (!live || node !== turn.currentText) {
+        hydrateMermaid(node);
+        hydrateMath(node);
+      }
     }
     const last = turn.textSegments[turn.textSegments.length - 1];
     if (live && last) last.classList.add("is-streaming");
@@ -782,6 +831,7 @@
     for (const node of turn.textSegments) {
       node.classList.remove("is-streaming");
       hydrateMermaid(node);
+      hydrateMath(node);
     }
     for (const thinking of turn.shell.row.querySelectorAll(".thinking[open]")) {
       thinking.open = false;
@@ -801,7 +851,6 @@
   function handleEvent(event, turn) {
     switch (event.type) {
       case "turn_start":
-        if (event.model) $("model-chip").textContent = event.model;
         break;
       case "text": {
         if (!event.text) break;
@@ -824,7 +873,10 @@
       }
       case "tool_started": {
         clearPending(turn);
-        if (turn.currentText) hydrateMermaid(turn.currentText);
+        if (turn.currentText) {
+          hydrateMermaid(turn.currentText);
+          hydrateMath(turn.currentText);
+        }
         turn.currentText = null;
         turn.currentReasoning = null;
         turn.currentReasoningText = null;
@@ -859,7 +911,7 @@
       case "notice":
         systemNote(event.text);
         break;
-      case "retry":
+      case "retry": {
         if (event.partial) {
           // The host already displayed an abandoned opening. Clear it so the
           // retried attempt is not spliced onto a stale partial answer.
@@ -873,16 +925,19 @@
           if (turn.currentReasoning) turn.currentReasoning.remove();
           turn.currentReasoning = null;
           turn.currentReasoningText = null;
-          systemNote(
-            `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}; ` +
-            "the partial response was discarded."
-          );
-        } else {
-          systemNote(
-            `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}`
-          );
         }
+        // Keep one live retry entry and update its count instead of appending
+        // a new note for every failed attempt.
+        if (!turn.retryNote || !turn.retryNote.isConnected) {
+          turn.retryNote = h("div", "system-note retry-note");
+          $("messages").appendChild(turn.retryNote);
+        }
+        turn.retryNote.textContent =
+          `Retrying (${event.attempt}/${event.max_attempts}) — ${event.reason}` +
+          (event.partial ? "; the partial response was discarded." : "");
+        scrollIfSticky();
         break;
+      }
       case "permission_request":
         showPermission(event);
         break;
@@ -948,6 +1003,24 @@
     await runChat({ text, images, appendUser: true });
   }
 
+  async function consumeTurnStream(response, turn) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let sawDone = false;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSSE(buffer, (event) => {
+        if (event.type === "done") sawDone = true;
+        handleEvent(event, turn);
+      });
+      if (sawDone) break;
+    }
+    return sawDone;
+  }
+
   async function runChat({ text = null, images = [], appendUser = true, continueFlag = false }) {
     if (state.busy) return;
     state.busy = true;
@@ -971,19 +1044,7 @@
         const payload = await response.json().catch(() => null);
         throw new Error((payload && payload.error) || `Request failed (${response.status})`);
       }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = parseSSE(buffer, (event) => {
-          if (event.type === "done") sawDone = true;
-          handleEvent(event, turn);
-        });
-        if (sawDone) break;
-      }
+      sawDone = await consumeTurnStream(response, turn);
       if (!sawDone) {
         systemNote("Connection closed before the turn finished.", "error");
         finalizeTurn(turn, "error");
@@ -1000,7 +1061,80 @@
       if (state.turn === turn) finalizeTurn(turn, turn.stopReason);
       updateComposer();
       $("input").focus();
-      hidePermission(true);
+      // A dropped stream no longer cancels the server turn; do not turn that
+      // into an implicit permission denial. Explicit stop is handled server-side.
+      hidePermission(false);
+      const canonical = sawDone && !["error", "cancelled"].includes(turn.stopReason || "");
+      const meta = {
+        usage: turn.usage,
+        stopReason: turn.stopReason,
+        elapsed: turn.elapsed,
+      };
+      await refreshState({ render: canonical });
+      if (canonical) attachLastTurnMeta(meta);
+      await refreshSessions();
+    }
+  }
+
+  function renderActiveTurnHistory(data) {
+    const messages = data.messages || [];
+    const base = Number.isInteger(data.active_turn?.base)
+      ? Math.max(0, Math.min(data.active_turn.base, messages.length))
+      : messages.length;
+    renderHistory(messages.slice(0, base));
+    const pending = messages[base];
+    if (pending && pending.role === "user") {
+      addUserMessage(pending.content, pending.id);
+      updateEmptyState();
+    }
+  }
+
+  async function attachActiveTurn() {
+    if (state.busy) return;
+    state.busy = true;
+    state.stopping = false;
+    updateComposer();
+    const turn = createTurn(null, [], { appendUser: false });
+    state.stick = true;
+    scrollIfSticky(true);
+
+    const controller = new AbortController();
+    state.controller = controller;
+    let sawDone = false;
+    try {
+      const response = await fetch("/api/turn/stream", {
+        headers: authHeaders(),
+        signal: controller.signal,
+      });
+      if (response.status === 204) {
+        // The turn finished between bootstrap and attach; render canonical state.
+        state.turn = null;
+        turn.shell.row.remove();
+        await refreshState({ render: true });
+        return;
+      }
+      if (!response.ok || !response.body) {
+        const payload = await response.json().catch(() => null);
+        throw new Error((payload && payload.error) || `Request failed (${response.status})`);
+      }
+      sawDone = await consumeTurnStream(response, turn);
+      if (!sawDone) {
+        systemNote("Connection closed before the turn finished.", "error");
+        finalizeTurn(turn, "error");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        systemNote(error.message || String(error), "error");
+        finalizeTurn(turn, "error");
+      }
+    } finally {
+      state.busy = false;
+      state.stopping = false;
+      state.controller = null;
+      if (state.turn === turn) finalizeTurn(turn, turn.stopReason);
+      updateComposer();
+      $("input").focus();
+      hidePermission(false);
       const canonical = sawDone && !["error", "cancelled"].includes(turn.stopReason || "");
       const meta = {
         usage: turn.usage,
@@ -1356,6 +1490,11 @@
   // -------------------------------------------------------------- permission
 
   function showPermission(event) {
+    // Modal <dialog> elements sit in the browser's top layer and would hide
+    // this approval card, leaving the turn waiting until the permission timeout.
+    for (const id of ["library-dialog", "diagram-viewer"]) {
+      if ($(id).open) $(id).close();
+    }
     if (state.permission) hidePermission(true);
     state.permission = event;
     $("perm-title").textContent = `Allow ${event.tool}?`;
@@ -1410,7 +1549,6 @@
     state.data = data;
     applyDocumentMode(data);
     $("connection-dot").className = "brand-dot online";
-    $("model-chip").textContent = data.model;
     const selectedLibrary = (data.libraries || []).find((entry) => entry.id === data.session_context?.library_id);
     $("top-sub").textContent = data.mode === "deepdocx" ? `${selectedLibrary?.name || "文档库"} · ${(data.session_context?.documents || []).length ? "已限定文档" : "整个文档库"}` : data.cwd || "workspace";
     $("top-sub").title = data.cwd || "";
@@ -1458,28 +1596,97 @@
     });
     if (active) {
       const library = (data.libraries || []).find((entry) => entry.id === data.session_context?.library_id);
-      $("library-name").textContent = library?.name || "当前文档库";
-      refreshDocumentNavigation();
+      $("library-manage-name").textContent = library?.name || "当前文档库";
+      $("library-manage-name").title = library?.root || "";
+      if ($("library-dialog").open) refreshDocumentNavigation();
     } else {
       closeEvidence();
+      if ($("library-dialog").open) $("library-dialog").close();
     }
   }
 
+  async function setLibraryTab(name) {
+    for (const button of document.querySelectorAll("[data-library-tab]")) {
+      const active = button.dataset.libraryTab === name;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    }
+    for (const panel of document.querySelectorAll("[data-library-panel]")) {
+      panel.hidden = panel.dataset.libraryPanel !== name;
+    }
+    if (name === "overview") await refreshDocumentNavigation();
+    if (name === "index") Promise.resolve(window.DcxIndexes?.activate?.()).catch(() => {});
+  }
+
+  async function openLibrary(tab = "overview") {
+    if (state.data?.mode !== "deepdocx") { toast("请先进入 DeepDocx 文档工作区。"); return false; }
+    const dialog = $("library-dialog");
+    if (!dialog.open) {
+      const library = (state.data.libraries || []).find((entry) => entry.id === state.data.session_context?.library_id);
+      $("library-path").textContent = library ? `${library.name} · ${library.root}` : "当前文档库";
+      $("library-path").title = library?.root || "";
+      dialog.showModal();
+    }
+    await setLibraryTab(tab);
+    return true;
+  }
+
+  function renditionLabel(name) {
+    return name === "basic" ? "Basic" : name === "marker-json-v1" ? "Marker" : name;
+  }
+
+  function renderLibraryFacts(documents) {
+    const pages = documents.reduce((sum, doc) => sum + (Number(doc.page_count) || 0), 0);
+    const renditions = [...new Set(documents.flatMap((doc) => (doc.renditions || []).map((item) => renditionLabel(item.rendition))))];
+    const scoped = state.data?.session_context?.documents || [];
+    const facts = [
+      ["文档", `${documents.length} 篇`],
+      ["页数", pages.toLocaleString()],
+      ["解析产物", renditions.join(" · ") || "—"],
+      ["当前范围", scoped.length ? `已限定 ${scoped.length} 篇` : "整个文档库"],
+    ];
+    $("library-facts").replaceChildren(...facts.map(([label, value]) => {
+      const item = h("div", "library-fact");
+      item.append(h("span", "", label), h("strong", "", value));
+      item.querySelector("strong").title = value;
+      return item;
+    }));
+  }
+
   async function refreshDocumentNavigation() {
+    if (!$("library-dialog").open) return;
     const session = state.data?.session_id;
+    const query = $("document-search").value.trim();
     try {
-      const data = await api(`/api/documents?q=${encodeURIComponent($("document-search").value)}`);
-      if (session !== state.data?.session_id) return;
-      $("document-list").replaceChildren();
-      for (const doc of data.documents || []) {
-        const button = h("button", "document-item", doc.title);
+      const data = await api(`/api/documents?q=${encodeURIComponent(query)}`);
+      if (session !== state.data?.session_id || !$("library-dialog").open) return;
+      const documents = data.documents || [];
+      $("document-count").textContent = `${documents.length} 篇`;
+      renderLibraryFacts(documents);
+      const rows = documents.map((doc) => {
+        const button = h("button", "document-item");
         button.type = "button";
-        button.title = `${doc.page_count} 页 · ${doc.renditions.map((item) => item.rendition).join(", ")}`;
-        const rendition = doc.renditions.find((item) => item.rendition !== "basic") || doc.renditions[0];
-        button.dataset.locator = `doc:${doc.doc_id}@${rendition.version}/${rendition.rendition}/page:1`;
-        $("document-list").appendChild(button);
-      }
-      if (!(data.documents || []).length) $("document-list").appendChild(h("p", "side-hint", "没有匹配的论文"));
+        const renditions = (doc.renditions || []).map((item) => renditionLabel(item.rendition));
+        button.title = `${doc.title} · ${doc.page_count} 页 · ${renditions.join(", ")}`;
+        const main = h("span", "document-item-main");
+        main.append(
+          h("strong", "", doc.title),
+          h("small", "", `${doc.page_count} 页 · ${renditions.join(" / ") || "无产物"}`),
+        );
+        button.append(main, h("span", "document-item-arrow", "↗"));
+        const rendition = (doc.renditions || []).find((item) => item.rendition !== "basic") || (doc.renditions || [])[0];
+        if (rendition) {
+          button.addEventListener("click", () => {
+            $("library-dialog").close();
+            openEvidence(`doc:${doc.doc_id}@${rendition.version}/${rendition.rendition}/page:1`);
+          });
+        } else {
+          button.disabled = true;
+        }
+        return button;
+      });
+      $("document-list").replaceChildren(...rows);
+      if (!rows.length) $("document-list").appendChild(h("p", "library-empty", query ? "没有匹配的论文" : "文档库中还没有可用论文"));
     } catch (error) { toast(error.message); }
   }
 
@@ -1671,7 +1878,11 @@
     const mode = $("ingest-form").querySelector('input[name="ingest-mode"]:checked')?.value;
     $("ingest-start").disabled = locked || ingestState.checking || !ingestState.files.length || !ingestModeReady(mode) || !!ingestValidation();
     $("ingest-start").textContent = ingestState.submitting ? "正在准备…" : "开始生成";
-    $("ingest-open").textContent = active && job.library_id === state.data?.session_context?.library_id ? "◌ 查看添加进度" : "＋ 添加文档";
+    const badge = $("ingest-badge");
+    const activeHere = active && job.library_id === state.data?.session_context?.library_id;
+    badge.hidden = !activeHere;
+    badge.textContent = activeHere ? "进行中" : "";
+    $("ingest-open").classList.toggle("busy", activeHere);
   }
 
   function selectIngestFiles(files) {
@@ -1797,6 +2008,7 @@
   async function openIngestDialog() {
     const libraryId = state.data?.session_context?.library_id;
     if (state.data?.mode !== "deepdocx" || !libraryId) { toast("请先进入 DeepDocx 文档工作区。"); return; }
+    if (!(await openLibrary("add"))) return;
     const same = ingestState.libraryId === libraryId;
     if (!same && ingestState.submitting) { toast("请等待当前文件上传完成。"); return; }
     if (!same) resetIngest();
@@ -1804,7 +2016,6 @@
     const library = state.data.libraries?.find((item) => item.id === libraryId);
     $("ingest-library").textContent = library?.name || "当前文档库";
     $("ingest-library").title = library?.root || "";
-    $("ingest-dialog").showModal();
     const checking = checkIngestEnvironment();
     try {
       if (!ingestState.job && !ingestState.submitting) {
@@ -2622,7 +2833,15 @@
         await refreshSessions();
       } catch (error) { toast(error.message); }
     });
-    $("library-name").addEventListener("click", openDocumentDialog);
+    $("library-open").addEventListener("click", () => openLibrary("overview"));
+    $("library-dismiss").addEventListener("click", () => $("library-dialog").close());
+    $("library-tab-overview").addEventListener("click", () => setLibraryTab("overview"));
+    $("index-open").addEventListener("click", () => openLibrary("index"));
+    $("semantic-status").addEventListener("click", () => openLibrary("index"));
+    $("library-switch").addEventListener("click", () => {
+      $("library-dialog").close();
+      openDocumentDialog();
+    });
     $("deepdocx-cancel").addEventListener("click", () => $("deepdocx-dialog").close());
     $("deepdocx-register").addEventListener("click", registerLibrary);
     $("deepdocx-library").addEventListener("change", loadDocumentScope);
@@ -2631,7 +2850,7 @@
     $("ingest-open").addEventListener("click", openIngestDialog);
     $("ingest-form").addEventListener("submit", startIngest);
     $("ingest-cancel").addEventListener("click", cancelIngest);
-    for (const id of ["ingest-close", "ingest-dismiss"]) $(id).addEventListener("click", () => $("ingest-dialog").close());
+    $("ingest-close").addEventListener("click", () => $("library-dialog").close());
     $("ingest-new").addEventListener("click", () => { resetIngest(); checkIngestEnvironment(); });
     $("ingest-retry").addEventListener("click", checkIngestEnvironment);
     $("ingest-pick").addEventListener("click", () => $("ingest-files").click());
@@ -2754,8 +2973,8 @@
     $("perm-deny").addEventListener("click", () => decidePermission("no"));
 
     document.addEventListener("keydown", (event) => {
-      // Native dialog owns Escape and focus while inspecting a diagram.
-      if ($("diagram-viewer").open) return;
+      // Native dialogs own Escape and focus while they are open.
+      if ($("diagram-viewer").open || $("library-dialog").open) return;
       if (!$("permission").hidden) {
         if (event.key === "Escape") { event.preventDefault(); decidePermission("no"); }
         if (event.key === "Enter" && event.target.tagName !== "BUTTON") {
@@ -2836,8 +3055,18 @@
     updateComposer();
     try {
       const data = await api("/api/bootstrap");
-      applyState(data, { render: true });
-      await refreshSessions();
+      if (data.active_turn) {
+        // A reload must not replay the turn's already-appended assistant/tool
+        // messages twice; render history up to the turn boundary and let the
+        // replayed event log reconstruct the in-flight response.
+        applyState(data, { render: false });
+        renderActiveTurnHistory(data);
+        await refreshSessions();
+        await attachActiveTurn();
+      } else {
+        applyState(data, { render: true });
+        await refreshSessions();
+      }
     } catch (error) {
       $("connection-dot").className = "brand-dot offline";
       if (/unauthorized/i.test(error.message)) {

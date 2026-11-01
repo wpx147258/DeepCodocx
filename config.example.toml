@@ -23,6 +23,12 @@ supports_images = true
 # enabled = false
 budget_tokens = 100000  # must be below max_output_tokens
 
+[web]
+# Starting port for `dcx web --auto-port`. It increments when another workspace
+# owns the port. Bare `dcx` launchers can use this to keep one server per
+# workspace. Plain `dcx web` also uses this as its default port.
+port = 8765
+
 [memory]
 # The agent writes memory itself through the Remember tool; there is no
 # background extraction loop.
