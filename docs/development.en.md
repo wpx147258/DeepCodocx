@@ -57,7 +57,8 @@ fixtures to cover attachment references, target routing, compact cards, coverage
 badges, image source reading, themes, and restored history.
 Streaming acceptance checks that a page reload reattaches to the in-flight turn,
 that reconnect retry notices stay in one entry and update their attempt count,
-and that Markdown LaTeX formulas render locally.
+that Markdown LaTeX formulas render locally, and that every assistant response
+has a copy tag.
 
 Screenshots in the output directory support visual inspection. For `web_smoke`, add
 `--library /path/to/paper-bundles` to check a real local corpus containing

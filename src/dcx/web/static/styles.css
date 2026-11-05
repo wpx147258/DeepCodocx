@@ -1085,7 +1085,17 @@ html[data-theme="light"] .icon-moon { display: none; }
   background: var(--surface-2);
   border-color: var(--line);
 }
-.turn-actions { display: flex; gap: 6px; margin-top: 6px; }
+.turn-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.turn-actions .copy-response {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+.turn-actions .copy-response:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+}
 .bubble-image {
   display: block;
   max-width: min(280px, 100%);

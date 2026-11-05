@@ -43,7 +43,7 @@ Mermaid 验收使用真实渲染器检查图表／源码切换、复制、缩放
 文档对话验收使用真实 runtime／stdio MCP 和本地推理 fixture，检查附件引用、目标路由、
 紧凑来源卡片、覆盖徽标、回读原图、主题与历史恢复。
 流式验收检查刷新页面后重新接续正在输出的回合，断网重试提示保持单一条目并更新次数，
-以及 Markdown 中的 LaTeX 公式在本地渲染。
+Markdown 中的 LaTeX 公式在本地渲染，以及每条助手回复末尾的复制标签。
 输出目录中的截图用于界面核对。`web_smoke` 附加 `--library /path/to/paper-bundles` 可检查包含
 MEMORYVLA Marker 产物的真实本地语料，目录只读访问。
 

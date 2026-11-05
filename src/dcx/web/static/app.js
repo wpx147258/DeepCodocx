@@ -626,6 +626,7 @@
       if (block.type === "text") {
         if (!block.text) continue;
         const node = h("div", "md");
+        node._raw = block.text;
         node.innerHTML = renderMarkdown(block.text);
         shell.segments.appendChild(node);
         hydrateMermaid(node);
@@ -642,6 +643,56 @@
       }
     }
     return shell;
+  }
+
+  function assistantText(shell) {
+    const nodes = shell?.segments?.querySelectorAll(".md") || [];
+    return [...nodes]
+      .map((node) => (typeof node._raw === "string" ? node._raw : node.textContent || ""))
+      .filter((text) => text.trim())
+      .join("\n\n");
+  }
+
+  async function copyResponse(shell, button) {
+    const text = assistantText(shell);
+    if (!text) { toast("Nothing to copy."); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "Copied";
+      setTimeout(() => { button.textContent = "Copy"; }, 1400);
+    } catch (_) {
+      toast("Could not copy.");
+    }
+  }
+
+  function assistantActions(shell, { regenerate = false } = {}) {
+    let actions = shell.body.querySelector(".turn-actions");
+    const text = assistantText(shell);
+    if (!text && !regenerate) {
+      if (actions) actions.remove();
+      return null;
+    }
+    if (!actions) {
+      actions = h("div", "turn-actions");
+      shell.body.appendChild(actions);
+    }
+    if (!actions.querySelector(".copy-response")) {
+      const copy = h("button", "turn-action copy-response", "Copy");
+      copy.type = "button";
+      copy.title = "Copy the response";
+      copy.addEventListener("click", () => copyResponse(shell, copy));
+      actions.appendChild(copy);
+    }
+    const copy = actions.querySelector(".copy-response");
+    if (copy) copy.hidden = !text;
+    if (regenerate && !actions.querySelector(".regenerate-response")) {
+      const button = h("button", "turn-action regenerate-response", "Regenerate");
+      button.type = "button";
+      button.title = "Regenerate the last response";
+      button.addEventListener("click", regenerateLastTurn);
+      actions.appendChild(button);
+    }
+    return actions;
   }
 
   function buildMeta(meta) {
@@ -697,20 +748,18 @@
           finishToolCard(cards.get(result.tool_use_id), result, null);
         }
       } else {
+        if (shell) assistantActions(shell);
         shell = null;
         lastShell = null;
         lastRole = "user";
         addUserMessage(message.content, inherited ? null : message.id);
       }
     }
-    if (lastRole === "assistant" && lastShell && messages.findLastIndex((message) => message.role === "user") >= (state.data?.session_context?.fork_boundary || 0)) {
-      const actions = h("div", "turn-actions");
-      const regenerate = h("button", "turn-action", "Regenerate");
-      regenerate.type = "button";
-      regenerate.title = "Regenerate the last response";
-      regenerate.addEventListener("click", regenerateLastTurn);
-      actions.appendChild(regenerate);
-      lastShell.body.appendChild(actions);
+    if (lastRole === "assistant" && lastShell) {
+      const canRegenerate =
+        messages.findLastIndex((message) => message.role === "user") >=
+        (state.data?.session_context?.fork_boundary || 0);
+      assistantActions(lastShell, { regenerate: canRegenerate });
     }
     updateEmptyState();
     updateTitle(messages);
@@ -839,6 +888,7 @@
     const meta = buildMeta({ usage: turn.usage, stopReason: turn.stopReason, elapsed: turn.elapsed });
     turn.shell.meta.replaceWith(meta);
     turn.shell.meta = meta;
+    assistantActions(turn.shell);
     if (!turn.textSegments.length && !turn.cards.size && !turn.error &&
         !turn.shell.segments.querySelector(".thinking")) {
       turn.shell.segments.appendChild(h("div", "md", "No response."));

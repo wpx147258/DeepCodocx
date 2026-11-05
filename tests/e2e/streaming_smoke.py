@@ -202,7 +202,11 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="dcx-math-") as temporary:
             server, thread, url = _start(MathProvider(), Path(temporary))
             try:
-                page = browser.new_page(viewport={"width": 1280, "height": 900})
+                context = browser.new_context(
+                    viewport={"width": 1280, "height": 900},
+                    permissions=["clipboard-read", "clipboard-write"],
+                )
+                page = context.new_page()
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(url)
@@ -212,12 +216,25 @@ def main() -> None:
                 expect(page.locator(".katex")).to_have_count(6, timeout=10000)
                 expect(page.locator(".katex-display")).to_have_count(2)
                 expect(page.locator("#messages")).not_to_contain_text("$E =")
+                expect(page.locator(".copy-response")).to_have_count(1)
+                page.locator(".copy-response").first.click()
+                expect(page.locator(".copy-response").first).to_have_text("Copied")
+                assert "E = mc^2" in page.evaluate("navigator.clipboard.readText()")
+
+                # Every completed assistant turn, including earlier ones, keeps
+                # its own copy tag.
+                page.locator("#input").fill("second response")
+                page.locator("#send").click()
+                expect(page.locator(".copy-response")).to_have_count(2, timeout=10000)
+                page.locator(".copy-response").first.click()
+                assert "E = mc^2" in page.evaluate("navigator.clipboard.readText()")
+
                 if output:
                     page.screenshot(
                         path=str(output / "stream-math.png"), animations="disabled"
                     )
                 assert not errors, errors
-                page.close()
+                context.close()
             finally:
                 _stop(server, thread)
 
@@ -225,7 +242,7 @@ def main() -> None:
     print(
         "PASS: reload reattaches to the in-flight turn and replays partial text; "
         "retry notices stay in one entry and update their attempt count; "
-        "inline and display LaTeX render locally"
+        "inline and display LaTeX render locally; every assistant turn has a copy tag"
     )
 
 

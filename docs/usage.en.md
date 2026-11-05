@@ -44,6 +44,8 @@ Escape closes the viewer. Diagram colors follow the workspace theme.
   output; reconnect retries update one notice with the current attempt count.
 - Markdown and LaTeX formulas in messages (`$...$`, `$$...$$`, `\(...\)`,
   `\[...\]`) render locally; write `\$` for a literal dollar sign.
+- Every assistant response ends with a **Copy** tag that copies its
+  Markdown/LaTeX text.
 - Browser approvals, Ask / Auto permissions, top-right model selection, and
   context readouts.
 - Session search, rename, archive, restore, and Markdown / JSON export.
