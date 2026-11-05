@@ -653,13 +653,26 @@
       .join("\n\n");
   }
 
+  const COPY_GLYPHS = `
+    <svg class="copy-glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M15.5 8.5V6.7a2.2 2.2 0 0 0-2.2-2.2H6.7a2.2 2.2 0 0 0-2.2 2.2v6.6a2.2 2.2 0 0 0 2.2 2.2h1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <svg class="check-glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+
   async function copyResponse(shell, button) {
     const text = assistantText(shell);
     if (!text) { toast("Nothing to copy."); return; }
     try {
       await navigator.clipboard.writeText(text);
-      button.textContent = "Copied";
-      setTimeout(() => { button.textContent = "Copy"; }, 1400);
+      button.classList.add("copied");
+      clearTimeout(button._copiedTimer);
+      button._copiedTimer = setTimeout(() => {
+        button.classList.remove("copied");
+        button._copiedTimer = null;
+      }, 1400);
     } catch (_) {
       toast("Could not copy.");
     }
@@ -677,9 +690,11 @@
       shell.body.appendChild(actions);
     }
     if (!actions.querySelector(".copy-response")) {
-      const copy = h("button", "turn-action copy-response", "Copy");
+      const copy = h("button", "turn-action copy-response");
       copy.type = "button";
-      copy.title = "Copy the response";
+      copy.title = "Copy response";
+      copy.setAttribute("aria-label", "Copy response");
+      copy.innerHTML = COPY_GLYPHS;
       copy.addEventListener("click", () => copyResponse(shell, copy));
       actions.appendChild(copy);
     }

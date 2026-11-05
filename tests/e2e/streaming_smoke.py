@@ -218,7 +218,7 @@ def main() -> None:
                 expect(page.locator("#messages")).not_to_contain_text("$E =")
                 expect(page.locator(".copy-response")).to_have_count(1)
                 page.locator(".copy-response").first.click()
-                expect(page.locator(".copy-response").first).to_have_text("Copied")
+                expect(page.locator(".copy-response.copied")).to_have_count(1)
                 assert "E = mc^2" in page.evaluate("navigator.clipboard.readText()")
 
                 # Every completed assistant turn, including earlier ones, keeps

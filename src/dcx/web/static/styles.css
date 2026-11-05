@@ -1087,6 +1087,11 @@ html[data-theme="light"] .icon-moon { display: none; }
 }
 .turn-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .turn-actions .copy-response {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 24px;
+  padding: 0;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink-soft);
@@ -1096,6 +1101,15 @@ html[data-theme="light"] .icon-moon { display: none; }
   background: var(--surface-2);
   color: var(--ink);
 }
+.copy-response .copy-glyph,
+.copy-response .check-glyph { width: 14px; height: 14px; }
+.copy-response .check-glyph { display: none; }
+.copy-response.copied {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.copy-response.copied .copy-glyph { display: none; }
+.copy-response.copied .check-glyph { display: block; }
 .bubble-image {
   display: block;
   max-width: min(280px, 100%);
